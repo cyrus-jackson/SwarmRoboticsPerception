@@ -15,6 +15,8 @@ public class Shape : MonoBehaviour
     private List<Vector3> corners = new List<Vector3>();
     private int[] targetIndices;
 
+    public bool manualUpdate = false;
+
     void Start()
     {
         if (agentPrefab == null)
@@ -22,27 +24,45 @@ public class Shape : MonoBehaviour
             return;
         }
 
-        InitializeShape();
+        if (!manualUpdate)
+        {
+            InitializeShape();
+        }
     }
 
-    void InitializeShape()
+    public void InitializeShape()
     {
+        ClearAgents();
         if (numberOfAgents < 3) numberOfAgents = 3;
 
         CalculateCorners();
         SpawnAgents();
     }
 
+    private void ClearAgents()
+    {
+        if (agents != null)
+        {
+            foreach (var agent in agents)
+            {
+                if (agent != null) Destroy(agent);
+            }
+            agents.Clear();
+        }
+    }
+
     void CalculateCorners()
     {
         if (corners == null) corners = new List<Vector3>();
         corners.Clear();
-        float angleStep = 360f / numberOfAgents;
+        
+        int cornersCount = Mathf.Max(3, numberOfAgents / 2);
+        float angleStep = 360f / cornersCount;
 
-        for (int i = 0; i < numberOfAgents; i++)
+        for (int i = 0; i < cornersCount; i++)
         {
             // Calculate angle in radians
-            float angle = ((numberOfAgents - i - 1) * angleStep + rotationOffset) * Mathf.Deg2Rad;
+            float angle = ((cornersCount - i - 1) * angleStep + rotationOffset) * Mathf.Deg2Rad;
 
             // Calculate position on XY plane
             float x = Mathf.Cos(angle) * radius;
@@ -60,19 +80,42 @@ public class Shape : MonoBehaviour
     void SpawnAgents()
     {
         targetIndices = new int[numberOfAgents];
+        int cornersCount = corners.Count;
 
         for (int i = 0; i < numberOfAgents; i++)
         {
-            Vector3 startPos = corners[i];
+            // Distribute 2 agents per edge: one at corner, one at midpoint
+            int edgeIndex = (i / 2) % cornersCount;
+            float t = (i % 2) * 0.5f;
+
+            Vector3 startCorner = corners[edgeIndex];
+            Vector3 endCorner = corners[(edgeIndex + 1) % cornersCount];
+            Vector3 startPos = Vector3.Lerp(startCorner, endCorner, t);
+
             GameObject agent = Instantiate(agentPrefab, startPos, Quaternion.identity);
             
             Rigidbody2D rb = agent.GetComponent<Rigidbody2D>();
             agents.Add(agent);
-            targetIndices[i] = (i + 1) % numberOfAgents;
+            
+            // Target is the next corner
+            targetIndices[i] = (edgeIndex + 1) % cornersCount;
         }
     }
 
     void FixedUpdate()
+    {
+        if (!manualUpdate)
+        {
+            if (agents.Count == 0) return;
+
+            for (int i = 0; i < agents.Count; i++)
+            {
+                MoveAgent(i);
+            }
+        }
+    }
+
+    public void ManualUpdate()
     {
         if (agents.Count == 0) return;
 
@@ -101,7 +144,7 @@ public class Shape : MonoBehaviour
         if (distance < stoppingDistance)
         {
             rb.linearVelocity = direction * 0;
-            targetIndices[index] = (targetIndex + 1) % numberOfAgents;
+            targetIndices[index] = (targetIndex + 1) % corners.Count;
         }
     }
 
