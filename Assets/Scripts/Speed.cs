@@ -36,7 +36,7 @@ public class Speed : BaseShape
                     offset = i * 0.5f;
                     break;
                 case SimilarityLevel.Low:
-                    offset = Random.Range(0f, numberOfAgents);
+                    offset = Random.Range(0f, numberOfAgents * 0.1f);
                     break;
             }
             speedOffsets.Add(offset);

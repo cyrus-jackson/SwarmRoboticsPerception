@@ -5,7 +5,8 @@ public enum MotionType
 {
     Shape,
     Speed,
-    Jitter
+    Jitter,
+    Pattern
 }
 
 public class MotionUI : MonoBehaviour
@@ -26,6 +27,7 @@ public class MotionUI : MonoBehaviour
     private float uiMoveSpeed;
     private SimilarityLevel uiSimilarityLevel = SimilarityLevel.High;
     private JitterType uiJitterType = JitterType.Sync;
+    private bool uiSequential = false;
 
     void Start()
     {
@@ -63,6 +65,9 @@ public class MotionUI : MonoBehaviour
                 break;
             case MotionType.Jitter:
                 currentShape = motionControllerGO.AddComponent<Jitter>();
+                break;
+            case MotionType.Pattern:
+                currentShape = motionControllerGO.AddComponent<Pattern>();
                 break;
         }
 
@@ -139,7 +144,7 @@ public class MotionUI : MonoBehaviour
         GUILayout.EndHorizontal();
 
         // Radius
-        if (selectedMotionType == MotionType.Shape)
+        if (selectedMotionType == MotionType.Shape || selectedMotionType == MotionType.Pattern)
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Radius: {uiRadius:F1}", GUILayout.Width(80));
@@ -169,6 +174,13 @@ public class MotionUI : MonoBehaviour
             GUILayout.Label("Jitter Type:");
             string[] jitterNames = System.Enum.GetNames(typeof(JitterType));
             uiJitterType = (JitterType)GUILayout.Toolbar((int)uiJitterType, jitterNames);
+        }
+
+        // Extra options for Pattern
+        if (selectedMotionType == MotionType.Pattern)
+        {
+            GUILayout.Space(5);
+            uiSequential = GUILayout.Toggle(uiSequential, "Sequential");
         }
 
         GUILayout.Space(10);
@@ -201,6 +213,11 @@ public class MotionUI : MonoBehaviour
         if (currentShape is Jitter jitterScript)
         {
             jitterScript.jitterType = uiJitterType;
+        }
+
+        if (currentShape is Pattern patternScript)
+        {
+            patternScript.sequential = uiSequential;
         }
     }
 }
