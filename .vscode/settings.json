@@ -67,5 +67,16 @@
         "*.sln": "*.csproj",
         "*.slnx": "*.csproj"
     },
+    "[csharp]": {
+    "editor.formatOnType": true,
+    "editor.formatOnSave": true
+    },
+    "omnisharp.jsonFormattingOptions": {
+        "NewLineOptions": {
+            "BeforeOpenBraceForMethods": true,
+            "BeforeOpenBraceForTypes": true,
+            "BeforeOpenBraceForControlBlocks": true
+        }
+    },
     "dotnet.defaultSolution": "My project.slnx"
 }

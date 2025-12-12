@@ -1,21 +1,14 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-public class Shape : MonoBehaviour
+public class Shape : BaseShape
 {
-
-    public GameObject agentPrefab;
-    public int numberOfAgents = 4;
-    public float radius = 5f;
-    public float moveSpeed = 5f;
     public float stoppingDistance = 0.1f;
     public float rotationOffset = 0f;
 
     private List<GameObject> agents = new List<GameObject>();
     private List<Vector3> corners = new List<Vector3>();
     private int[] targetIndices;
-
-    public bool manualUpdate = false;
 
     void Start()
     {
@@ -24,22 +17,22 @@ public class Shape : MonoBehaviour
             return;
         }
 
-        if (!manualUpdate)
+        if (!manualControl)
         {
-            InitializeShape();
+            Initialize();
         }
     }
 
-    public void InitializeShape()
+    public override void Initialize()
     {
-        ClearAgents();
+        Clear();
         if (numberOfAgents < 3) numberOfAgents = 3;
 
         CalculateCorners();
         SpawnAgents();
     }
 
-    private void ClearAgents()
+    public override void Clear()
     {
         if (agents != null)
         {
@@ -104,7 +97,7 @@ public class Shape : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (!manualUpdate)
+        if (!manualControl)
         {
             if (agents.Count == 0) return;
 
@@ -115,7 +108,7 @@ public class Shape : MonoBehaviour
         }
     }
 
-    public void ManualUpdate()
+    public override void ManualUpdate()
     {
         if (agents.Count == 0) return;
 

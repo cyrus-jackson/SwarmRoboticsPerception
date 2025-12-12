@@ -5,9 +5,7 @@ public class Linear : MonoBehaviour
 {
     public GameObject agent;
     public float speed;
-    
-    int numberOfAgents = 6;
-    
+
     private Vector3 startingPosition;
     private Camera cam;
 
@@ -35,7 +33,7 @@ public class Linear : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        this.transform.position += new Vector3(speed, 0, 0); 
+        this.transform.position += new Vector3(speed, 0, 0);
 
         if (cam != null)
         {
