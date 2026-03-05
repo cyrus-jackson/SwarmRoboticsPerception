@@ -1,0 +1,44 @@
+using UnityEngine;
+
+public class SwarmManager : MonoBehaviour
+{
+    [Header("Swarm Elements")]
+    public GameObject[] agents;
+    public Transform commonFateTarget; 
+    public Transform centralObstacle;
+
+    [Header("Swarm Parameters")]
+    // Imbalance in favour of Cohesion (cI) over Separation (sI) for Densification
+    public float cohesionIntensity = 5.0f;    // cI
+    public float separationIntensity = 1.0f;  // sI
+    public float alignmentIntensity = 2.0f;   // aI
+    public float frictionIntensity = 0.1f;    // fI
+    public float randomMovementIntensity = 1.0f; // rI
+    
+    [Header("Overlapping Avoidance (Agent to Agent)")]
+    public float overlappingAvoidanceIntensity = 20.0f; // oI
+    public float safetyDistance = 0.5f; // sd
+
+    [Header("Environmental Obstacle Avoidance")]
+    public float envObstacleAvoidanceIntensity = 20.0f; 
+    
+    [Header("Perception")]
+    public float perceptionRadius = 3.0f;
+    public float obstacleAvoidanceRadius = 2.5f;
+    public float maxSpeed = 5.0f;
+
+    void Update()
+    {
+        foreach (GameObject agentObj in agents)
+        {
+            if (agentObj != null)
+            {
+                SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
+                if (agent != null)
+                {
+                    agent.UpdateAgent(this);
+                }
+            }
+        }
+    }
+}

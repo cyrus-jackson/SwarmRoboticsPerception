@@ -6,13 +6,15 @@ public enum MotionType
     Shape,
     Speed,
     Jitter,
-    Pattern
+    Pattern,
+    ObstacleAvoidance
 }
 
 public class MotionUI : MonoBehaviour
 {
     [Header("Assets")]
     public GameObject agentPrefab;
+    public GameObject obstaclePrefab;
 
     private BaseShape currentShape;
     private GameObject motionControllerGO;
@@ -28,6 +30,7 @@ public class MotionUI : MonoBehaviour
     private SimilarityLevel uiSimilarityLevel = SimilarityLevel.High;
     private JitterType uiJitterType = JitterType.Sync;
     private bool uiSequential = false;
+    private float uiRotationSpeed = 50f;
 
     void Start()
     {
@@ -68,6 +71,9 @@ public class MotionUI : MonoBehaviour
                 break;
             case MotionType.Pattern:
                 currentShape = motionControllerGO.AddComponent<Pattern>();
+                break;
+            case MotionType.ObstacleAvoidance:
+                currentShape = motionControllerGO.AddComponent<ObstacleAvoidance>();
                 break;
         }
 
@@ -183,18 +189,42 @@ public class MotionUI : MonoBehaviour
             uiSequential = GUILayout.Toggle(uiSequential, "Sequential");
         }
 
+        // Extra options for ObstacleAvoidance
+        if (selectedMotionType == MotionType.ObstacleAvoidance)
+        {
+            GUILayout.Space(5);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"Rotation Speed: {uiRotationSpeed:F0}", GUILayout.Width(120));
+            uiRotationSpeed = GUILayout.HorizontalSlider(uiRotationSpeed, 0f, 360f);
+            GUILayout.EndHorizontal();
+        }
+
         GUILayout.Space(10);
 
         // Control Buttons
         if (GUILayout.Button("Initialize / Reset"))
         {
+            if (currentShape != null) currentShape.Clear();
             ApplySettings();
-            currentShape.Initialize();
+            if (currentShape != null) currentShape.Initialize();
         }
 
         if (GUILayout.Button(isRunning ? "Stop Motion" : "Start Motion"))
         {
             isRunning = !isRunning;
+        }
+    }
+
+    void CreateObstacle(ObstacleAvoidance script)
+    {
+        if (obstaclePrefab != null)
+        {
+            GameObject obstacleInstance = Instantiate(obstaclePrefab, Vector3.zero, Quaternion.identity);
+            script.SetObstacle(obstacleInstance);
+        }
+        else
+        {
+            Debug.LogWarning("MotionUI: No Obstacle Prefab assigned!");
         }
     }
 
@@ -218,6 +248,13 @@ public class MotionUI : MonoBehaviour
         if (currentShape is Pattern patternScript)
         {
             patternScript.sequential = uiSequential;
+        }
+
+        if (currentShape is ObstacleAvoidance obstacleScript)
+        {
+            obstacleScript.rotationSpeed = uiRotationSpeed;
+            // Creation logic handles assignment based on uiObstacleType
+            CreateObstacle(obstacleScript);
         }
     }
 }
