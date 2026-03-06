@@ -6,7 +6,8 @@ public enum SwarmType
 {
     Flocking,
     Densification,
-    Random
+    Random,
+    Dispersion
 }
 
 public class UI : MonoBehaviour
@@ -20,6 +21,12 @@ public class UI : MonoBehaviour
     
     [Tooltip("List of possible obstacles in the scene")]
     public Transform[] obstacles;
+
+    [Header("Dispersion Setup")]
+    [Tooltip("The circular spawn area for Dispersion type")]
+    public Transform circleSpawnArea;
+    [Tooltip("The obstacle specifically for Dispersion type")]
+    public Transform dispersionObstacle;
 
     private bool showUI = true;
     private bool isRunning = false;
@@ -42,7 +49,7 @@ public class UI : MonoBehaviour
     private float uiEnvAvoid = 40.0f;
     
     private float uiPerceptionRad = 10.0f;
-    private float uiObstacleRad = 2.0f;
+    private float uiObstacleRad = 1.8f;
     private float uiMaxSpeed = 1.5f;
 
     private Vector2 scrollPosition;
@@ -80,18 +87,31 @@ public class UI : MonoBehaviour
                 uiSeparation = 1f;
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
+                uiObstacleRad = 1.5f;
+                uiSafetyDist = 1f; // Moderate safety distance for balanced flocking
                 break;
             case SwarmType.Densification:
                 uiCohesion = 5.0f;
                 uiSeparation = 1.0f;
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
+                uiObstacleRad = 1.5f;
+                uiSafetyDist = 0.5f; // Lower safety distance to encourage tight grouping
                 break;
             case SwarmType.Random:
                 uiCohesion = 0.0f;
                 uiSeparation = 0.0f;
                 uiAlignment = 0.0f;
-                uiRandomMvmt = 10.0f;
+                uiObstacleRad = 1.5f;
+                uiRandomMvmt = 20.0f;
+                break;
+            case SwarmType.Dispersion:
+                uiCohesion = 0.0f;
+                uiSeparation = 5.0f;
+                uiAlignment = 0.0f;
+                uiRandomMvmt = 0.0f;
+                uiObstacleRad = 1.0f;
+                uiSafetyDist = 2.0f; // High safety distance to encourage spreading
                 break;
         }
     }
@@ -126,24 +146,32 @@ public class UI : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
-        if (spawnAreas != null && spawnAreas.Length > 0)
+        if (selectedSwarmType == SwarmType.Dispersion)
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Spawn Area:", GUILayout.Width(80));
-            string[] areaNames = new string[spawnAreas.Length];
-            for (int i=0; i<spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
-            selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
-            GUILayout.EndHorizontal();
+            GUILayout.Space(5);
+            GUILayout.Label("<i>Using designated Circle Spawn & Dispersion Obstacle</i>");
         }
-
-        if (obstacles != null && obstacles.Length > 0)
+        else
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Obstacle:", GUILayout.Width(80));
-            string[] obsNames = new string[obstacles.Length];
-            for (int i=0; i<obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
-            selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
-            GUILayout.EndHorizontal();
+            if (spawnAreas != null && spawnAreas.Length > 0)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Spawn Area:", GUILayout.Width(80));
+                string[] areaNames = new string[spawnAreas.Length];
+                for (int i=0; i<spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
+                selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
+                GUILayout.EndHorizontal();
+            }
+
+            if (obstacles != null && obstacles.Length > 0)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Obstacle:", GUILayout.Width(80));
+                string[] obsNames = new string[obstacles.Length];
+                for (int i=0; i<obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
+                selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
+                GUILayout.EndHorizontal();
+            }
         }
 
         GUILayout.Space(10);
@@ -154,7 +182,7 @@ public class UI : MonoBehaviour
         uiSeparation = DrawSlider("Separation", uiSeparation, 0, 10);
         uiAlignment = DrawSlider("Alignment", uiAlignment, 0, 10);
         uiFriction = DrawSlider("Friction", uiFriction, 0, 1);
-        uiRandomMvmt = DrawSlider("Random Mvmt", uiRandomMvmt, 0, 10);
+        uiRandomMvmt = DrawSlider("Random Mvmt", uiRandomMvmt, 0, 20);
         
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
@@ -226,14 +254,36 @@ public class UI : MonoBehaviour
         swarmManager.obstacleAvoidanceRadius = uiObstacleRad;
         swarmManager.maxSpeed = uiMaxSpeed;
 
-        if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length)
+        if (selectedSwarmType == SwarmType.Dispersion)
         {
-            swarmManager.centralObstacle = obstacles[selectedObstacleIndex];
-            
-            // Optionally toggle active state of obstacles so only selected is visible
-            for(int i = 0; i < obstacles.Length; i++)
+            if (dispersionObstacle != null)
             {
-                 if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
+                swarmManager.centralObstacle = dispersionObstacle;
+                dispersionObstacle.gameObject.SetActive(true);
+            }
+            
+            // Hide other obstacles
+            if (obstacles != null)
+            {
+                for (int i = 0; i < obstacles.Length; i++)
+                {
+                    if (obstacles[i] != null) obstacles[i].gameObject.SetActive(false);
+                }
+            }
+        }
+        else
+        {
+            if (dispersionObstacle != null) dispersionObstacle.gameObject.SetActive(false);
+
+            if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length)
+            {
+                swarmManager.centralObstacle = obstacles[selectedObstacleIndex];
+                
+                // Optionally toggle active state of obstacles so only selected is visible
+                for(int i = 0; i < obstacles.Length; i++)
+                {
+                     if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
+                }
             }
         }
     }
@@ -251,39 +301,93 @@ public class UI : MonoBehaviour
         activeAgents.Clear();
 
         Transform activeSpawnArea = null;
-        if (spawnAreas != null && spawnAreas.Length > 0 && selectedSpawnAreaIndex < spawnAreas.Length)
+
+        if (selectedSwarmType == SwarmType.Dispersion)
         {
-            activeSpawnArea = spawnAreas[selectedSpawnAreaIndex];
+            activeSpawnArea = circleSpawnArea;
+            if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(true);
+            
+            // disable other spawn areas
+            if (spawnAreas != null)
+            {
+                foreach (var area in spawnAreas)
+                {
+                    if (area != null) area.gameObject.SetActive(false);
+                }
+            }
+        }
+        else
+        {
+            if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(false);
+
+            if (spawnAreas != null && spawnAreas.Length > 0)
+            {
+                // enable only the selected standard spawn area
+                for (int i = 0; i < spawnAreas.Length; i++)
+                {
+                    if (spawnAreas[i] != null) spawnAreas[i].gameObject.SetActive(i == selectedSpawnAreaIndex);
+                }
+
+                if (selectedSpawnAreaIndex < spawnAreas.Length)
+                {
+                    activeSpawnArea = spawnAreas[selectedSpawnAreaIndex];
+                }
+            }
         }
 
         if (agentPrefab == null || activeSpawnArea == null) 
         {
-            Debug.LogWarning("UI: Missing agent prefab or spawn area!");
+            Debug.LogWarning("UI: Missing agent prefab or active spawn area!");
             return;
         }
 
         Vector3 center = activeSpawnArea.position;
-        Vector3 size = activeSpawnArea.lossyScale;
-        Vector3 min = center - size / 2f;
-        
-        int sideLength = Mathf.CeilToInt(Mathf.Sqrt(uiNumberOfAgents));
-        float stepX = sideLength > 1 ? size.x / (sideLength - 1) : 0;
-        float stepY = sideLength > 1 ? size.y / (sideLength - 1) : 0;
 
-        int count = 0;
-        for (int x = 0; x < sideLength; x++)
+        if (selectedSwarmType == SwarmType.Dispersion)
         {
-            for (int y = 0; y < sideLength; y++)
-            {
-                if (count >= uiNumberOfAgents) break;
+            // Spawn evenly spaced in a filled circle using Fermat's spiral
+            float radius = Mathf.Max(activeSpawnArea.lossyScale.x, activeSpawnArea.lossyScale.y) / 2f;
+            float goldenAngle = 137.5f * Mathf.Deg2Rad;
 
-                float posX = sideLength == 1 ? center.x : min.x + (x * stepX);
-                float posY = sideLength == 1 ? center.y : min.y + (y * stepY);
+            for (int i = 0; i < uiNumberOfAgents; i++)
+            {
+                // Calculate distance from center to evenly distribute points area-wise
+                float r = radius * Mathf.Sqrt((float)i / Mathf.Max(1, uiNumberOfAgents - 1));
+                float theta = i * goldenAngle;
+
+                float posX = center.x + r * Mathf.Cos(theta);
+                float posY = center.y + r * Mathf.Sin(theta);
                 Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                 GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
                 activeAgents.Add(newAgent);
-                count++;
+            }
+        }
+        else
+        {
+            // Grid spawn
+            Vector3 size = activeSpawnArea.lossyScale;
+            Vector3 min = center - size / 2f;
+            
+            int sideLength = Mathf.CeilToInt(Mathf.Sqrt(uiNumberOfAgents));
+            float stepX = sideLength > 1 ? size.x / (sideLength - 1) : 0;
+            float stepY = sideLength > 1 ? size.y / (sideLength - 1) : 0;
+
+            int count = 0;
+            for (int x = 0; x < sideLength; x++)
+            {
+                for (int y = 0; y < sideLength; y++)
+                {
+                    if (count >= uiNumberOfAgents) break;
+
+                    float posX = sideLength == 1 ? center.x : min.x + (x * stepX);
+                    float posY = sideLength == 1 ? center.y : min.y + (y * stepY);
+                    Vector3 spawnPos = new Vector3(posX, posY, center.z);
+
+                    GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                    activeAgents.Add(newAgent);
+                    count++;
+                }
             }
         }
 

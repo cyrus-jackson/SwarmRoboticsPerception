@@ -8,7 +8,6 @@ public class SwarmManager : MonoBehaviour
     public Transform centralObstacle;
 
     [Header("Swarm Parameters")]
-    // Imbalance in favour of Cohesion (cI) over Separation (sI) for Densification
     public float cohesionIntensity = 5.0f;    // cI
     public float separationIntensity = 1.0f;  // sI
     public float alignmentIntensity = 2.0f;   // aI

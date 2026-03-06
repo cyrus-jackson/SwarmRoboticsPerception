@@ -25,7 +25,7 @@ public class SwarmAgent : MonoBehaviour
                 if (distance < manager.perceptionRadius)
                 {
                     cohesionSum += otherPos;
-                    separationSum += (currentPosition - otherPos); 
+                    separationSum += (currentPosition - otherPos).normalized;
                     
                     SwarmAgent otherAgent = otherObj.GetComponent<SwarmAgent>();
                     if (otherAgent != null)
@@ -64,7 +64,7 @@ public class SwarmAgent : MonoBehaviour
         Vector2 overlappingAvoidanceForce = overlappingAvoidanceSum * manager.overlappingAvoidanceIntensity;
         acceleration += overlappingAvoidanceForce;
 
-        // Rule 4 (from literature): Random movement rule
+        // Rule 4 Random movement rule
         float randX = Random.Range(-0.5f, 0.5f);
         float randY = Random.Range(-0.5f, 0.5f);
         Vector2 randomMovementForce = new Vector2(randX, randY) * manager.randomMovementIntensity;
@@ -84,6 +84,7 @@ public class SwarmAgent : MonoBehaviour
             if (distToObstacle < manager.obstacleAvoidanceRadius)
             {
                 Vector2 avoidDirection = (currentPosition - (Vector2)manager.centralObstacle.position);
+                // Inverse square law
                 Vector2 avoidForce = (avoidDirection / Mathf.Max(distToObstacle * distToObstacle, 0.01f)) * manager.envObstacleAvoidanceIntensity;
                 acceleration += avoidForce;
             }
