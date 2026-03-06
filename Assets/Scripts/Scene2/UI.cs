@@ -190,8 +190,8 @@ public class UI : MonoBehaviour
         uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 50);
 
         GUILayout.Label("<b>Perception</b>");
-        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 1, 10);
-        uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 1, 10);
+        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0, 10);
+        uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
         GUILayout.Space(10);
@@ -279,7 +279,7 @@ public class UI : MonoBehaviour
             {
                 swarmManager.centralObstacle = obstacles[selectedObstacleIndex];
                 
-                // Optionally toggle active state of obstacles so only selected is visible
+                // toggle active state of obstacles so only selected is visible
                 for(int i = 0; i < obstacles.Length; i++)
                 {
                      if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
@@ -351,7 +351,7 @@ public class UI : MonoBehaviour
 
             for (int i = 0; i < uiNumberOfAgents; i++)
             {
-                // Calculate distance from center to evenly distribute points area-wise
+                // Calculate distance from center to evenly distribute points area wise
                 float r = radius * Mathf.Sqrt((float)i / Mathf.Max(1, uiNumberOfAgents - 1));
                 float theta = i * goldenAngle;
 
