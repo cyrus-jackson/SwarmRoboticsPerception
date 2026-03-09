@@ -752,6 +752,7 @@ MonoBehaviour:
   perceptionRadius: 10
   obstacleAvoidanceRadius: 2
   maxSpeed: 1.5
+  showPerceptionRadius: 0
 --- !u!4 &912726474
 Transform:
   m_ObjectHideFlags: 0
@@ -1654,7 +1655,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 841814d4c51da49039869fcb7df60c44, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI
-  agentPrefab: {fileID: 366980688}
+  agentPrefab: {fileID: 1837056938}
   swarmManager: {fileID: 912726473}
   spawnAreas:
   - {fileID: 1159210625}

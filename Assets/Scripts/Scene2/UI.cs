@@ -51,7 +51,7 @@ public class UI : MonoBehaviour
     private float uiPerceptionRad = 10.0f;
     private float uiObstacleRad = 1.8f;
     private float uiMaxSpeed = 1.5f;
-
+    private bool uiShowPerceptionRadius = false;
     private Vector2 scrollPosition;
 
     void Start()
@@ -194,8 +194,10 @@ public class UI : MonoBehaviour
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
-        GUILayout.Space(10);
+        GUILayout.Space(10);        GUILayout.Label("<b>Visualization</b>");
+        uiShowPerceptionRadius = GUILayout.Toggle(uiShowPerceptionRadius, " Show Perception Radius");
 
+        GUILayout.Space(10);
         if (GUILayout.Button("Apply Settings to Active Swarm"))
         {
             UpdateSwarmManager();
@@ -253,6 +255,8 @@ public class UI : MonoBehaviour
         swarmManager.perceptionRadius = uiPerceptionRad;
         swarmManager.obstacleAvoidanceRadius = uiObstacleRad;
         swarmManager.maxSpeed = uiMaxSpeed;
+        
+        swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
 
         if (selectedSwarmType == SwarmType.Dispersion)
         {

@@ -5,10 +5,18 @@ public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
 
+    // Cached values for visualization
+    private float cachedPerceptionRadius;
+    private bool cachedShowPerceptionRadius;
+
     public void UpdateAgent(SwarmManager manager)
     {
+        // Cache variables for gizmos
+        cachedPerceptionRadius = manager.perceptionRadius;
+        cachedShowPerceptionRadius = manager.showPerceptionRadius;
+
         Vector2 currentPosition = transform.position;
-        
+
         Vector2 cohesionSum = Vector2.zero;
         Vector2 separationSum = Vector2.zero;
         Vector2 alignmentSum = Vector2.zero;
@@ -26,7 +34,7 @@ public class SwarmAgent : MonoBehaviour
                 {
                     cohesionSum += otherPos;
                     separationSum += (currentPosition - otherPos).normalized;
-                    
+
                     SwarmAgent otherAgent = otherObj.GetComponent<SwarmAgent>();
                     if (otherAgent != null)
                     {
@@ -36,10 +44,10 @@ public class SwarmAgent : MonoBehaviour
                 }
 
                 // Rule 6: Overlapping Avoidance
-                if (distance < manager.safetyDistance && distance > 0.0001f) 
+                if (distance < manager.safetyDistance && distance > 0.0001f)
                 {
                     Vector2 avoidDirection = currentPosition - otherPos;
-                    overlappingAvoidanceSum += avoidDirection.normalized; 
+                    overlappingAvoidanceSum += avoidDirection.normalized;
                 }
             }
         }
@@ -50,10 +58,10 @@ public class SwarmAgent : MonoBehaviour
         {
             // Rule 1: Cohesion
             Vector2 cohesionForce = ((cohesionSum / neighborCount) - currentPosition) * manager.cohesionIntensity;
-            
+
             // Rule 2: Separation
             Vector2 separationForce = (separationSum / neighborCount) * manager.separationIntensity;
-            
+
             // Rule 3: Alignment
             Vector2 alignmentForce = (alignmentSum / neighborCount) * manager.alignmentIntensity;
 
@@ -74,7 +82,7 @@ public class SwarmAgent : MonoBehaviour
         if (manager.commonFateTarget != null)
         {
             Vector2 directionToFate = ((Vector2)manager.commonFateTarget.position - currentPosition).normalized;
-            acceleration += directionToFate * manager.cohesionIntensity; 
+            acceleration += directionToFate * manager.cohesionIntensity;
         }
 
         // Environmental Obstacle Avoidance (Repulsive potential field)
@@ -96,7 +104,7 @@ public class SwarmAgent : MonoBehaviour
 
         // Apply Dynamics Updates
         currentVelocity += acceleration * Time.deltaTime;
-        
+
         // Limit to max speed
         if (currentVelocity.magnitude > manager.maxSpeed)
         {
@@ -110,6 +118,15 @@ public class SwarmAgent : MonoBehaviour
         {
             float angle = Mathf.Atan2(currentVelocity.y, currentVelocity.x) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
+        }
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (cachedShowPerceptionRadius)
+        {
+            Gizmos.color = new Color(0f, 1f, 0f, 0.2f); // green
+            Gizmos.DrawWireSphere(transform.position, cachedPerceptionRadius);
         }
     }
 }

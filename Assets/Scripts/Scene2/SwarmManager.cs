@@ -26,6 +26,9 @@ public class SwarmManager : MonoBehaviour
     public float obstacleAvoidanceRadius = 2.5f;
     public float maxSpeed = 5.0f;
 
+    [Header("Visualization")]
+    public bool showPerceptionRadius = false;
+
     void Update()
     {
         foreach (GameObject agentObj in agents)
