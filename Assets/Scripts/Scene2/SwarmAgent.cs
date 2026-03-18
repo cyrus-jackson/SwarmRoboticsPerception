@@ -81,7 +81,15 @@ public class SwarmAgent : MonoBehaviour
         // Common Fate (Attraction to global target)
         if (manager.commonFateTarget != null)
         {
-            Vector2 directionToFate = ((Vector2)manager.commonFateTarget.position - currentPosition).normalized;
+            Vector2 targetPoint = (Vector2)manager.commonFateTarget.position;
+
+            // If the target has a collider, attract to the closest point on the collider
+            if (manager.commonFateCollider != null)
+            {
+                targetPoint = manager.commonFateCollider.ClosestPoint(currentPosition);
+            }
+
+            Vector2 directionToFate = (targetPoint - currentPosition).normalized;
             acceleration += directionToFate * manager.cohesionIntensity;
         }
 
@@ -125,7 +133,7 @@ public class SwarmAgent : MonoBehaviour
     {
         if (cachedShowPerceptionRadius)
         {
-            Gizmos.color = new Color(0f, 1f, 0f, 0.2f); // green
+            Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, cachedPerceptionRadius);
         }
     }

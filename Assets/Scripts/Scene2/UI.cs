@@ -15,10 +15,10 @@ public class UI : MonoBehaviour
     [Header("Swarm Setup")]
     public GameObject agentPrefab;
     public SwarmManager swarmManager;
-    
+
     [Tooltip("List of possible spawn areas in the scene")]
     public Transform[] spawnAreas;
-    
+
     [Tooltip("List of possible obstacles in the scene")]
     public Transform[] obstacles;
 
@@ -43,12 +43,12 @@ public class UI : MonoBehaviour
     private float uiAlignment = 2.0f;
     private float uiFriction = 0.1f;
     private float uiRandomMvmt = 0.0f;
-    
+
     private float uiOverlapAvoid = 20.0f;
-    private float uiSafetyDist = 1f;
+    private float uiSafetyDist = 0.2f;
     private float uiEnvAvoid = 40.0f;
-    
-    private float uiPerceptionRad = 10.0f;
+
+    private float uiPerceptionRad = 0.2f;
     private float uiObstacleRad = 1.8f;
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = false;
@@ -58,7 +58,7 @@ public class UI : MonoBehaviour
     {
         if (swarmManager != null)
             swarmManager.enabled = false;
-        
+
         ApplyPreset(selectedSwarmType);
         ResetScene();
     }
@@ -122,7 +122,7 @@ public class UI : MonoBehaviour
 
         GUILayout.BeginArea(new Rect(20, 20, 350, Screen.height - 40), GUI.skin.box);
         scrollPosition = GUILayout.BeginScrollView(scrollPosition);
-        
+
         GUILayout.Label("Swarm Control UI (Press 'X' to hide)", GUI.skin.label);
         GUILayout.Space(10);
 
@@ -158,7 +158,7 @@ public class UI : MonoBehaviour
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Spawn Area:", GUILayout.Width(80));
                 string[] areaNames = new string[spawnAreas.Length];
-                for (int i=0; i<spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
+                for (int i = 0; i < spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
                 selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
                 GUILayout.EndHorizontal();
             }
@@ -168,7 +168,7 @@ public class UI : MonoBehaviour
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Obstacle:", GUILayout.Width(80));
                 string[] obsNames = new string[obstacles.Length];
-                for (int i=0; i<obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
+                for (int i = 0; i < obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
                 selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
                 GUILayout.EndHorizontal();
             }
@@ -176,14 +176,14 @@ public class UI : MonoBehaviour
 
         GUILayout.Space(10);
         GUILayout.Label("<b>Swarm Parameters</b>");
-        
+
         uiNumberOfAgents = DrawSlider("Agents", uiNumberOfAgents, 4, 200, true);
         uiCohesion = DrawSlider("Cohesion", uiCohesion, 0, 10);
         uiSeparation = DrawSlider("Separation", uiSeparation, 0, 10);
         uiAlignment = DrawSlider("Alignment", uiAlignment, 0, 10);
         uiFriction = DrawSlider("Friction", uiFriction, 0, 1);
         uiRandomMvmt = DrawSlider("Random Mvmt", uiRandomMvmt, 0, 20);
-        
+
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
         uiSafetyDist = DrawSlider("Safety Dist", uiSafetyDist, 0.1f, 5f);
@@ -194,7 +194,7 @@ public class UI : MonoBehaviour
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
-        GUILayout.Space(10);        GUILayout.Label("<b>Visualization</b>");
+        GUILayout.Space(10); GUILayout.Label("<b>Visualization</b>");
         uiShowPerceptionRadius = GUILayout.Toggle(uiShowPerceptionRadius, " Show Perception Radius");
 
         GUILayout.Space(10);
@@ -241,21 +241,21 @@ public class UI : MonoBehaviour
     void UpdateSwarmManager()
     {
         if (swarmManager == null) return;
-        
+
         swarmManager.cohesionIntensity = uiCohesion;
         swarmManager.separationIntensity = uiSeparation;
         swarmManager.alignmentIntensity = uiAlignment;
         swarmManager.frictionIntensity = uiFriction;
         swarmManager.randomMovementIntensity = uiRandomMvmt;
-        
+
         swarmManager.overlappingAvoidanceIntensity = uiOverlapAvoid;
         swarmManager.safetyDistance = uiSafetyDist;
         swarmManager.envObstacleAvoidanceIntensity = uiEnvAvoid;
-        
+
         swarmManager.perceptionRadius = uiPerceptionRad;
         swarmManager.obstacleAvoidanceRadius = uiObstacleRad;
         swarmManager.maxSpeed = uiMaxSpeed;
-        
+
         swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
 
         if (selectedSwarmType == SwarmType.Dispersion)
@@ -265,7 +265,7 @@ public class UI : MonoBehaviour
                 swarmManager.centralObstacle = dispersionObstacle;
                 dispersionObstacle.gameObject.SetActive(true);
             }
-            
+
             // Hide other obstacles
             if (obstacles != null)
             {
@@ -282,11 +282,11 @@ public class UI : MonoBehaviour
             if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length)
             {
                 swarmManager.centralObstacle = obstacles[selectedObstacleIndex];
-                
+
                 // toggle active state of obstacles so only selected is visible
-                for(int i = 0; i < obstacles.Length; i++)
+                for (int i = 0; i < obstacles.Length; i++)
                 {
-                     if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
+                    if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
                 }
             }
         }
@@ -310,7 +310,7 @@ public class UI : MonoBehaviour
         {
             activeSpawnArea = circleSpawnArea;
             if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(true);
-            
+
             // disable other spawn areas
             if (spawnAreas != null)
             {
@@ -339,7 +339,7 @@ public class UI : MonoBehaviour
             }
         }
 
-        if (agentPrefab == null || activeSpawnArea == null) 
+        if (agentPrefab == null || activeSpawnArea == null)
         {
             Debug.LogWarning("UI: Missing agent prefab or active spawn area!");
             return;
@@ -372,7 +372,7 @@ public class UI : MonoBehaviour
             // Grid spawn
             Vector3 size = activeSpawnArea.lossyScale;
             Vector3 min = center - size / 2f;
-            
+
             int sideLength = Mathf.CeilToInt(Mathf.Sqrt(uiNumberOfAgents));
             float stepX = sideLength > 1 ? size.x / (sideLength - 1) : 0;
             float stepY = sideLength > 1 ? size.y / (sideLength - 1) : 0;
