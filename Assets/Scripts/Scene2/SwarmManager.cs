@@ -17,13 +17,13 @@ public class SwarmManager : MonoBehaviour
 
     [Header("Overlapping Avoidance (Agent to Agent)")]
     public float overlappingAvoidanceIntensity = 20.0f; // oI
-    public float safetyDistance = 0.5f; // sd
+    public float safetyDistance = 1f; // sd
 
     [Header("Environmental Obstacle Avoidance")]
     public float envObstacleAvoidanceIntensity = 20.0f;
 
     [Header("Perception")]
-    public float perceptionRadius = 0.2f;
+    public float perceptionRadius = 1f;
     public float obstacleAvoidanceRadius = 2.5f;
     public float maxSpeed = 5.0f;
 

@@ -51,7 +51,7 @@ public class UI : MonoBehaviour
     private float uiPerceptionRad = 0.2f;
     private float uiObstacleRad = 1.8f;
     private float uiMaxSpeed = 1.5f;
-    private bool uiShowPerceptionRadius = false;
+    private bool uiShowPerceptionRadius = true;
     private Vector2 scrollPosition;
 
     void Start()
@@ -87,22 +87,24 @@ public class UI : MonoBehaviour
                 uiSeparation = 1f;
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 1.5f;
+                uiObstacleRad = 0.8f;
                 uiSafetyDist = 1f; // Moderate safety distance for balanced flocking
+                uiPerceptionRad = 1f;
                 break;
             case SwarmType.Densification:
                 uiCohesion = 5.0f;
                 uiSeparation = 1.0f;
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 1.5f;
+                uiObstacleRad = 0.8f;
                 uiSafetyDist = 0.5f; // Lower safety distance to encourage tight grouping
+                uiPerceptionRad = 0.5f;
                 break;
             case SwarmType.Random:
                 uiCohesion = 0.0f;
                 uiSeparation = 0.0f;
                 uiAlignment = 0.0f;
-                uiObstacleRad = 1.5f;
+                uiObstacleRad = 0.8f;
                 uiRandomMvmt = 20.0f;
                 break;
             case SwarmType.Dispersion:
@@ -110,8 +112,9 @@ public class UI : MonoBehaviour
                 uiSeparation = 5.0f;
                 uiAlignment = 0.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 1.0f;
+                uiObstacleRad = 0.8f;
                 uiSafetyDist = 2.0f; // High safety distance to encourage spreading
+                uiPerceptionRad = 2.0f;
                 break;
         }
     }
@@ -399,6 +402,27 @@ public class UI : MonoBehaviour
         {
             swarmManager.agents = activeAgents.ToArray();
             UpdateSwarmManager(); // Apply parameters after reset
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        Gizmos.color = Color.blue;
+
+        if (obstacles != null)
+        {
+            foreach (Transform obs in obstacles)
+            {
+                if (obs != null)
+                {
+                    Gizmos.DrawWireSphere(obs.position, uiObstacleRad);
+                }
+            }
+        }
+
+        if (dispersionObstacle != null)
+        {
+            Gizmos.DrawWireSphere(dispersionObstacle.position, uiObstacleRad);
         }
     }
 }
