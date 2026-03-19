@@ -251,8 +251,8 @@ Transform:
   m_GameObject: {fileID: 86363313}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: 0.7071068, w: 0.7071068}
-  m_LocalPosition: {x: 16.362, y: -0.675, z: 0}
-  m_LocalScale: {x: 10.6712, y: 0.28153187, z: 1}
+  m_LocalPosition: {x: 16.362, y: 1.1608, z: 0}
+  m_LocalScale: {x: 14.342229, y: 0.28153187, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 306791247}
@@ -343,8 +343,8 @@ Transform:
   m_GameObject: {fileID: 236683208}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 17.03, y: 0.0284, z: 0}
-  m_LocalScale: {x: 1, y: 10.7032, z: 1}
+  m_LocalPosition: {x: 17.03, y: 1.986, z: 0}
+  m_LocalScale: {x: 1, y: 14.618431, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1306,7 +1306,7 @@ Transform:
   m_GameObject: {fileID: 911438469}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.2882, y: 0.1921, z: 0}
+  m_LocalPosition: {x: -0.13, y: 0.19, z: 0}
   m_LocalScale: {x: 20.038301, y: 9.76222, z: 0}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1505,7 +1505,7 @@ Transform:
   m_GameObject: {fileID: 997560495}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 3.2033, y: 4.83, z: 0}
+  m_LocalPosition: {x: 3.26, y: 8.35, z: 0}
   m_LocalScale: {x: 26.644594, y: 0.34383473, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1643,8 +1643,8 @@ Transform:
   m_GameObject: {fileID: 1007862639}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: 0.7071068, w: 0.7071068}
-  m_LocalPosition: {x: -10.02, y: -0.61, z: 0}
-  m_LocalScale: {x: 10.728099, y: 0.3438347, z: 1}
+  m_LocalPosition: {x: -10.02, y: 1.2139, z: 0}
+  m_LocalScale: {x: 14.375989, y: 0.3438347, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 306791247}
@@ -1907,7 +1907,7 @@ GameObject:
   - component: {fileID: 1159210625}
   - component: {fileID: 1159210624}
   m_Layer: 0
-  m_Name: DensificationSpawnArea
+  m_Name: RandomSpawnArea
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1981,8 +1981,8 @@ Transform:
   m_GameObject: {fileID: 1159210623}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -9.28, y: 0.12, z: -1.79}
-  m_LocalScale: {x: 1.8068614, y: 9.910772, z: 1}
+  m_LocalPosition: {x: -0.2076, y: 0.12, z: -1.79}
+  m_LocalScale: {x: 19.951725, y: 9.910772, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -2173,7 +2173,8 @@ MonoBehaviour:
   swarmManager: {fileID: 912726473}
   spawnAreas:
   - {fileID: 1159210625}
-  obstacles: []
+  obstacles:
+  - {fileID: 1089375806}
   commonFates: []
   circleSpawnArea: {fileID: 564621125}
   dispersionObstacle: {fileID: 792643042}
