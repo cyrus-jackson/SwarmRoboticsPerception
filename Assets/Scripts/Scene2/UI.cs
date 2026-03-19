@@ -47,7 +47,7 @@ public class UI : MonoBehaviour
     [Tooltip("The common fate specifically for Flocking type")]
     public Transform flockingCommonFate;
 
-    private bool showUI = true;
+    public bool showUI = true;
     private bool isRunning = false;
     private int uiNumberOfAgents = 40;
     private List<GameObject> activeAgents = new List<GameObject>();
@@ -247,6 +247,20 @@ public class UI : MonoBehaviour
         {
             ToggleMotion();
         }
+
+        GUILayout.Space(10);
+        if (GUILayout.Button("Record"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartBatchRecording();
+            }
+        }
     }
 
     float DrawSlider(string label, float val, float min, float max, bool isInt = false)
@@ -263,14 +277,37 @@ public class UI : MonoBehaviour
         return (int)DrawSlider(label, (float)val, (float)min, (float)max, true);
     }
 
-    void ToggleMotion()
+    public void SetMotion(bool play)
     {
-        isRunning = !isRunning;
+        isRunning = play;
         if (swarmManager != null)
         {
             UpdateSwarmManager();
             swarmManager.enabled = isRunning;
         }
+    }
+
+    public void SetParameter(SwarmParameterToRecord param, float value)
+    {
+        switch (param)
+        {
+            case SwarmParameterToRecord.Cohesion: uiCohesion = value; break;
+            case SwarmParameterToRecord.Separation: uiSeparation = value; break;
+            case SwarmParameterToRecord.Alignment: uiAlignment = value; break;
+            case SwarmParameterToRecord.Friction: uiFriction = value; break;
+            case SwarmParameterToRecord.RandomMovement: uiRandomMvmt = value; break;
+            case SwarmParameterToRecord.OverlapAvoidance: uiOverlapAvoid = value; break;
+            case SwarmParameterToRecord.SafetyDistance: uiSafetyDist = value; break;
+            case SwarmParameterToRecord.EnvAvoidance: uiEnvAvoid = value; break;
+            case SwarmParameterToRecord.PerceptionRadius: uiPerceptionRad = value; break;
+            case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
+            case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
+        }
+    }
+
+    void ToggleMotion()
+    {
+        SetMotion(!isRunning);
     }
 
     void UpdateSwarmManager()
@@ -395,7 +432,7 @@ public class UI : MonoBehaviour
         }
     }
 
-    void ResetScene()
+    public void ResetScene()
     {
         isRunning = false;
         if (swarmManager != null)
