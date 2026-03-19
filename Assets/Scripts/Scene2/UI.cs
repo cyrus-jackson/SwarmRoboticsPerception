@@ -22,11 +22,30 @@ public class UI : MonoBehaviour
     [Tooltip("List of possible obstacles in the scene")]
     public Transform[] obstacles;
 
+    [Tooltip("List of possible common fates in the scene")]
+    public Transform[] commonFates;
+
     [Header("Dispersion Setup")]
     [Tooltip("The circular spawn area for Dispersion type")]
     public Transform circleSpawnArea;
     [Tooltip("The obstacle specifically for Dispersion type")]
     public Transform dispersionObstacle;
+
+    [Header("Densification Setup")]
+    [Tooltip("The spawn area specifically for Densification type")]
+    public Transform densificationSpawnArea;
+    [Tooltip("The obstacle specifically for Densification type")]
+    public Transform densificationObstacle;
+    [Tooltip("The common fate specifically for Densification type")]
+    public Transform densificationCommonFate;
+
+    [Header("Flocking Setup")]
+    [Tooltip("The spawn area specifically for Flocking type")]
+    public Transform flockingSpawnArea;
+    [Tooltip("The obstacle specifically for Flocking type")]
+    public Transform flockingObstacle;
+    [Tooltip("The common fate specifically for Flocking type")]
+    public Transform flockingCommonFate;
 
     private bool showUI = true;
     private bool isRunning = false;
@@ -37,6 +56,7 @@ public class UI : MonoBehaviour
     private SwarmType selectedSwarmType = SwarmType.Densification;
     private int selectedSpawnAreaIndex = 0;
     private int selectedObstacleIndex = 0;
+    private int selectedCommonFateIndex = 0;
 
     private float uiCohesion = 5.0f;
     private float uiSeparation = 1.0f;
@@ -88,8 +108,8 @@ public class UI : MonoBehaviour
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
                 uiObstacleRad = 0.8f;
-                uiSafetyDist = 1f; // Moderate safety distance for balanced flocking
-                uiPerceptionRad = 1f;
+                uiSafetyDist = 0.5f;
+                uiPerceptionRad = 1.7f;
                 break;
             case SwarmType.Densification:
                 uiCohesion = 5.0f;
@@ -97,8 +117,8 @@ public class UI : MonoBehaviour
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
                 uiObstacleRad = 0.8f;
-                uiSafetyDist = 0.5f; // Lower safety distance to encourage tight grouping
-                uiPerceptionRad = 0.5f;
+                uiSafetyDist = 0.5f;
+                uiPerceptionRad = 1.7f;
                 break;
             case SwarmType.Random:
                 uiCohesion = 0.0f;
@@ -106,6 +126,7 @@ public class UI : MonoBehaviour
                 uiAlignment = 0.0f;
                 uiObstacleRad = 0.8f;
                 uiRandomMvmt = 20.0f;
+                uiPerceptionRad = 3.2f;
                 break;
             case SwarmType.Dispersion:
                 uiCohesion = 0.0f;
@@ -113,7 +134,7 @@ public class UI : MonoBehaviour
                 uiAlignment = 0.0f;
                 uiRandomMvmt = 0.0f;
                 uiObstacleRad = 0.8f;
-                uiSafetyDist = 2.0f; // High safety distance to encourage spreading
+                uiSafetyDist = 0.5f;
                 uiPerceptionRad = 2.0f;
                 break;
         }
@@ -149,33 +170,44 @@ public class UI : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
-        if (selectedSwarmType == SwarmType.Dispersion)
-        {
-            GUILayout.Space(5);
-            GUILayout.Label("<i>Using designated Circle Spawn & Dispersion Obstacle</i>");
-        }
-        else
-        {
-            if (spawnAreas != null && spawnAreas.Length > 0)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Spawn Area:", GUILayout.Width(80));
-                string[] areaNames = new string[spawnAreas.Length];
-                for (int i = 0; i < spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
-                selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
-                GUILayout.EndHorizontal();
-            }
+        // if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
+        // {
+        //     GUILayout.Space(5);
+        //     string typeName = selectedSwarmType.ToString();
+        //     GUILayout.Label($"<i>Using designated elements for {typeName}</i>");
+        // }
+        // else
+        // {
+        //     if (spawnAreas != null && spawnAreas.Length > 0)
+        //     {
+        //         GUILayout.BeginHorizontal();
+        //         GUILayout.Label("Spawn Area:", GUILayout.Width(80));
+        //         string[] areaNames = new string[spawnAreas.Length];
+        //         for (int i = 0; i < spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
+        //         selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
+        //         GUILayout.EndHorizontal();
+        //     }
 
-            if (obstacles != null && obstacles.Length > 0)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Obstacle:", GUILayout.Width(80));
-                string[] obsNames = new string[obstacles.Length];
-                for (int i = 0; i < obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
-                selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
-                GUILayout.EndHorizontal();
-            }
-        }
+        //     if (obstacles != null && obstacles.Length > 0)
+        //     {
+        //         GUILayout.BeginHorizontal();
+        //         GUILayout.Label("Obstacle:", GUILayout.Width(80));
+        //         string[] obsNames = new string[obstacles.Length];
+        //         for (int i = 0; i < obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
+        //         selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
+        //         GUILayout.EndHorizontal();
+        //     }
+
+        //     if (commonFates != null && commonFates.Length > 0)
+        //     {
+        //         GUILayout.BeginHorizontal();
+        //         GUILayout.Label("Cmmn Fate:", GUILayout.Width(80));
+        //         string[] fateNames = new string[commonFates.Length];
+        //         for (int i = 0; i < commonFates.Length; i++) fateNames[i] = commonFates[i] != null ? commonFates[i].name : "None";
+        //         selectedCommonFateIndex = GUILayout.SelectionGrid(selectedCommonFateIndex, fateNames, 2);
+        //         GUILayout.EndHorizontal();
+        //     }
+        // }
 
         GUILayout.Space(10);
         GUILayout.Label("<b>Swarm Parameters</b>");
@@ -261,12 +293,46 @@ public class UI : MonoBehaviour
 
         swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
 
-        if (selectedSwarmType == SwarmType.Dispersion)
+        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
         {
             if (dispersionObstacle != null)
             {
-                swarmManager.centralObstacle = dispersionObstacle;
-                dispersionObstacle.gameObject.SetActive(true);
+                dispersionObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Dispersion);
+                if (selectedSwarmType == SwarmType.Dispersion) swarmManager.centralObstacle = dispersionObstacle;
+            }
+            if (densificationObstacle != null)
+            {
+                densificationObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Densification);
+                if (selectedSwarmType == SwarmType.Densification) swarmManager.centralObstacle = densificationObstacle;
+            }
+            if (flockingObstacle != null)
+            {
+                flockingObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Flocking);
+                if (selectedSwarmType == SwarmType.Flocking) swarmManager.centralObstacle = flockingObstacle;
+            }
+
+            if (densificationCommonFate != null)
+            {
+                densificationCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Densification);
+                if (selectedSwarmType == SwarmType.Densification)
+                {
+                    swarmManager.commonFateTarget = densificationCommonFate;
+                    swarmManager.commonFateCollider = densificationCommonFate.GetComponent<Collider2D>();
+                }
+            }
+            if (flockingCommonFate != null)
+            {
+                flockingCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Flocking);
+                if (selectedSwarmType == SwarmType.Flocking)
+                {
+                    swarmManager.commonFateTarget = flockingCommonFate;
+                    swarmManager.commonFateCollider = flockingCommonFate.GetComponent<Collider2D>();
+                }
+            }
+            if (selectedSwarmType == SwarmType.Dispersion)
+            {
+                swarmManager.commonFateTarget = null;
+                swarmManager.commonFateCollider = null;
             }
 
             // Hide other obstacles
@@ -277,10 +343,24 @@ public class UI : MonoBehaviour
                     if (obstacles[i] != null) obstacles[i].gameObject.SetActive(false);
                 }
             }
+
+            // Hide other common fates
+            if (commonFates != null)
+            {
+                for (int i = 0; i < commonFates.Length; i++)
+                {
+                    if (commonFates[i] != null) commonFates[i].gameObject.SetActive(false);
+                }
+            }
         }
         else
         {
             if (dispersionObstacle != null) dispersionObstacle.gameObject.SetActive(false);
+            if (densificationObstacle != null) densificationObstacle.gameObject.SetActive(false);
+            if (densificationCommonFate != null) densificationCommonFate.gameObject.SetActive(false);
+
+            if (flockingObstacle != null) flockingObstacle.gameObject.SetActive(false);
+            if (flockingCommonFate != null) flockingCommonFate.gameObject.SetActive(false);
 
             if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length)
             {
@@ -291,6 +371,26 @@ public class UI : MonoBehaviour
                 {
                     if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
                 }
+            }
+
+            if (commonFates != null && commonFates.Length > 0 && selectedCommonFateIndex < commonFates.Length)
+            {
+                swarmManager.commonFateTarget = commonFates[selectedCommonFateIndex];
+                if (swarmManager.commonFateTarget != null)
+                {
+                    swarmManager.commonFateCollider = swarmManager.commonFateTarget.GetComponent<Collider2D>();
+                }
+
+                // toggle active state of common fates so only selected is visible
+                for (int i = 0; i < commonFates.Length; i++)
+                {
+                    if (commonFates[i] != null) commonFates[i].gameObject.SetActive(i == selectedCommonFateIndex);
+                }
+            }
+            else
+            {
+                swarmManager.commonFateTarget = null;
+                swarmManager.commonFateCollider = null;
             }
         }
     }
@@ -309,10 +409,29 @@ public class UI : MonoBehaviour
 
         Transform activeSpawnArea = null;
 
-        if (selectedSwarmType == SwarmType.Dispersion)
+        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
         {
-            activeSpawnArea = circleSpawnArea;
-            if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(true);
+            if (selectedSwarmType == SwarmType.Dispersion)
+            {
+                activeSpawnArea = circleSpawnArea;
+                if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(true);
+                if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(false);
+                if (flockingSpawnArea != null) flockingSpawnArea.gameObject.SetActive(false);
+            }
+            else if (selectedSwarmType == SwarmType.Densification)
+            {
+                activeSpawnArea = densificationSpawnArea;
+                if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(true);
+                if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(false);
+                if (flockingSpawnArea != null) flockingSpawnArea.gameObject.SetActive(false);
+            }
+            else
+            {
+                activeSpawnArea = flockingSpawnArea;
+                if (flockingSpawnArea != null) flockingSpawnArea.gameObject.SetActive(true);
+                if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(false);
+                if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(false);
+            }
 
             // disable other spawn areas
             if (spawnAreas != null)
@@ -326,6 +445,8 @@ public class UI : MonoBehaviour
         else
         {
             if (circleSpawnArea != null) circleSpawnArea.gameObject.SetActive(false);
+            if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(false);
+            if (flockingSpawnArea != null) flockingSpawnArea.gameObject.SetActive(false);
 
             if (spawnAreas != null && spawnAreas.Length > 0)
             {
@@ -350,7 +471,7 @@ public class UI : MonoBehaviour
 
         Vector3 center = activeSpawnArea.position;
 
-        if (selectedSwarmType == SwarmType.Dispersion)
+        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification)
         {
             // Spawn evenly spaced in a filled circle using Fermat's spiral
             float radius = Mathf.Max(activeSpawnArea.lossyScale.x, activeSpawnArea.lossyScale.y) / 2f;
@@ -423,6 +544,16 @@ public class UI : MonoBehaviour
         if (dispersionObstacle != null)
         {
             Gizmos.DrawWireSphere(dispersionObstacle.position, uiObstacleRad);
+        }
+
+        if (densificationObstacle != null)
+        {
+            Gizmos.DrawWireSphere(densificationObstacle.position, uiObstacleRad);
+        }
+
+        if (flockingObstacle != null)
+        {
+            Gizmos.DrawWireSphere(flockingObstacle.position, uiObstacleRad);
         }
     }
 }

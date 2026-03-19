@@ -86,6 +86,7 @@ public class SwarmAgent : MonoBehaviour
             // If the target has a collider, attract to the closest point on the collider
             if (manager.commonFateCollider != null)
             {
+                Debug.LogWarning("Attracting to common fate collider: " + manager.commonFateCollider.name);
                 targetPoint = manager.commonFateCollider.ClosestPoint(currentPosition);
             }
 
