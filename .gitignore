@@ -101,3 +101,7 @@ InitTestScene*.unity*
 
 .DS_Store*.slnx
 *.vsconfig
+
+# Simulation Recordings
+SimulationRecordings/
+

@@ -24,18 +24,37 @@ public enum SwarmParameterToRecord
 
 public class SimRecorder : MonoBehaviour
 {
+    [System.Serializable]
+    public class SimulationConfig
+    {
+        public string variedParameter;
+        public float variedParameterValue;
+        public float cohesion;
+        public float separation;
+        public float alignment;
+        public float friction;
+        public float randomMovement;
+        public float overlapAvoidance;
+        public float safetyDistance;
+        public float envAvoidance;
+        public float perceptionRadius;
+        public float obstacleRadius;
+        public float maxSpeed;
+        public int numAgents;
+    }
+
     public UI uiController;
     public SwarmManager swarmManager;
 
     [Header("Recording Settings")]
-    public float recordingTimePerSim = 10f;
+    public float recordingTimePerSim = 14f;
     public string saveFolder = "SimulationRecordings";
 
     [Header("Parameter Modification")]
     public SwarmParameterToRecord parameterToRecord = SwarmParameterToRecord.PerceptionRadius;
-    public float paramStart = 1.0f;
+    public float paramStart = 0.8f;
     public float paramStep = 0.2f;
-    public int paramIterations = 5;
+    public int paramIterations = 10;
 
     private bool isRecording = false; private float currentParamDisplayValue = 0f;
 
@@ -100,6 +119,26 @@ public class SimRecorder : MonoBehaviour
             uiController.SetMotion(true);
 
             string fileName = $"{paramFolderName.ToLower()}_{currentParam:F2}";
+
+            SimulationConfig config = new SimulationConfig
+            {
+                variedParameter = paramFolderName,
+                variedParameterValue = currentParam,
+                cohesion = swarmManager.cohesionIntensity,
+                separation = swarmManager.separationIntensity,
+                alignment = swarmManager.alignmentIntensity,
+                friction = swarmManager.frictionIntensity,
+                randomMovement = swarmManager.randomMovementIntensity,
+                overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                safetyDistance = swarmManager.safetyDistance,
+                envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                perceptionRadius = swarmManager.perceptionRadius,
+                obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                maxSpeed = swarmManager.maxSpeed,
+                numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
+            };
+            string configJson = JsonUtility.ToJson(config, true);
+            File.WriteAllText(Path.Combine(targetFolderPath, fileName + "_config.json"), configJson);
 
 #if UNITY_EDITOR
             var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();

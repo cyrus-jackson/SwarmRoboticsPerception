@@ -57,7 +57,6 @@ public class VideoGridManager : MonoBehaviour
 
     private void CreateVideoElement(string filePath)
     {
-        // Create container for the video Element
         GameObject videoElement = new GameObject("VideoView_" + Path.GetFileNameWithoutExtension(filePath));
         videoElement.transform.SetParent(gridContainer, false);
 
@@ -74,8 +73,7 @@ public class VideoGridManager : MonoBehaviour
         videoPlayer.renderMode = VideoRenderMode.RenderTexture;
         videoPlayer.audioOutputMode = VideoAudioOutputMode.None; // Mute audio because multiple videos will overlap
 
-        // Create a unique Render Texture dynamically for each video
-        // Smaller resolutions are ideal here to prevent GPU memory crashes when loading 10+ videos at once
+        
         RenderTexture rt = new RenderTexture(renderWidth, renderHeight, 0, RenderTextureFormat.ARGB32);
         rt.Create();
 

@@ -508,13 +508,21 @@ public class UI : MonoBehaviour
 
         Vector3 center = activeSpawnArea.position;
 
+        Transform activeObstacle = null;
+        if (selectedSwarmType == SwarmType.Dispersion) activeObstacle = dispersionObstacle;
+        else if (selectedSwarmType == SwarmType.Densification) activeObstacle = densificationObstacle;
+        else if (selectedSwarmType == SwarmType.Flocking) activeObstacle = flockingObstacle;
+        else if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length) activeObstacle = obstacles[selectedObstacleIndex];
+
         if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification)
         {
             // Spawn evenly spaced in a filled circle using Fermat's spiral
             float radius = Mathf.Max(activeSpawnArea.lossyScale.x, activeSpawnArea.lossyScale.y) / 2f;
             float goldenAngle = 137.5f * Mathf.Deg2Rad;
 
-            for (int i = 0; i < uiNumberOfAgents; i++)
+            int spawned = 0;
+            int i = 0;
+            while (spawned < uiNumberOfAgents && i < 10000) // 10000 limit to prevent infinite loops
             {
                 // Calculate distance from center to evenly distribute points area wise
                 float r = radius * Mathf.Sqrt((float)i / Mathf.Max(1, uiNumberOfAgents - 1));
@@ -524,8 +532,19 @@ public class UI : MonoBehaviour
                 float posY = center.y + r * Mathf.Sin(theta);
                 Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
-                GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
-                activeAgents.Add(newAgent);
+                bool valid = true;
+                if (activeObstacle != null && Vector3.Distance(spawnPos, activeObstacle.position) < uiObstacleRad + 2)
+                {
+                    valid = false;
+                }
+
+                if (valid)
+                {
+                    GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                    activeAgents.Add(newAgent);
+                    spawned++;
+                }
+                i++;
             }
         }
         else
@@ -539,20 +558,44 @@ public class UI : MonoBehaviour
             float stepY = sideLength > 1 ? size.y / (sideLength - 1) : 0;
 
             int count = 0;
-            for (int x = 0; x < sideLength; x++)
+            int attempts = 0;
+
+            // Adjust grid size to potentially find enough valid spots
+            int searchSide = sideLength;
+            while (count < uiNumberOfAgents && attempts < 100)
             {
-                for (int y = 0; y < sideLength; y++)
+                for (int x = 0; x < searchSide; x++)
                 {
-                    if (count >= uiNumberOfAgents) break;
+                    for (int y = 0; y < searchSide; y++)
+                    {
+                        if (count >= uiNumberOfAgents) break;
 
-                    float posX = sideLength == 1 ? center.x : min.x + (x * stepX);
-                    float posY = sideLength == 1 ? center.y : min.y + (y * stepY);
-                    Vector3 spawnPos = new Vector3(posX, posY, center.z);
+                        float posX = searchSide == 1 ? center.x : min.x + (x * stepX);
+                        float posY = searchSide == 1 ? center.y : min.y + (y * stepY);
+                        Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
-                    GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
-                    activeAgents.Add(newAgent);
-                    count++;
+                        bool valid = true;
+                        if (activeObstacle != null && Vector3.Distance(spawnPos, activeObstacle.position) < uiObstacleRad + 2)
+                        {
+                            valid = false;
+                        }
+
+                        if (valid)
+                        {
+                            // we need to make sure we don't spawn in the same place multiple times
+                            if (attempts == 0 || activeAgents.Find(a => Vector3.Distance(a.transform.position, spawnPos) < 0.1f) == null)
+                            {
+                                GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                                activeAgents.Add(newAgent);
+                                count++;
+                            }
+                        }
+                    }
                 }
+                searchSide++;
+                stepX = searchSide > 1 ? size.x / (searchSide - 1) : 0;
+                stepY = searchSide > 1 ? size.y / (searchSide - 1) : 0;
+                attempts++;
             }
         }
 
