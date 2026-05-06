@@ -513,7 +513,7 @@ public class UI : MonoBehaviour
         else if (selectedSwarmType == SwarmType.Flocking) activeObstacle = flockingObstacle;
         else if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length) activeObstacle = obstacles[selectedObstacleIndex];
 
-        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification)
+        if (selectedSwarmType == SwarmType.Dispersion)
         {
             // Spawn evenly spaced in a filled circle using Fermat's spiral
             float radius = Mathf.Max(activeSpawnArea.lossyScale.x, activeSpawnArea.lossyScale.y) / 2f;
