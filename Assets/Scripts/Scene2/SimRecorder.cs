@@ -17,7 +17,6 @@ public enum SwarmParameterToRecord
     OverlapAvoidance,
     SafetyDistance,
     EnvAvoidance,
-    PerceptionRadius,
     ObstacleRadius,
     MaxSpeed
 }
@@ -37,7 +36,6 @@ public class SimRecorder : MonoBehaviour
         public float overlapAvoidance;
         public float safetyDistance;
         public float envAvoidance;
-        public float perceptionRadius;
         public float obstacleRadius;
         public float maxSpeed;
         public int numAgents;
@@ -47,16 +45,24 @@ public class SimRecorder : MonoBehaviour
     public SwarmManager swarmManager;
 
     [Header("Recording Settings")]
-    public float recordingTimePerSim = 14f;
+    public float recordingTimePerSim = 15f;
     public string saveFolder = "SimulationRecordings";
 
-    [Header("Parameter Modification")]
-    public SwarmParameterToRecord parameterToRecord = SwarmParameterToRecord.PerceptionRadius;
-    public float paramStart = 0.8f;
-    public float paramStep = 0.2f;
-    public int paramIterations = 10;
+    [Header("Parameter 1 Modification")]
+    public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.Cohesion;
+    public float param1Start = 0.2f;
+    public float param1Step = 0.2f;
+    public int param1Iterations = 4;
 
-    private bool isRecording = false; private float currentParamDisplayValue = 0f;
+    [Header("Parameter 2 Modification")]
+    public SwarmParameterToRecord parameterToRecord2 = SwarmParameterToRecord.Separation;
+    public float param2Start = 0.2f;
+    public float param2Step = 0.2f;
+    public int param2Iterations = 4;
+
+    private bool isRecording = false;
+    private float currentParam1DisplayValue = 0f;
+    private float currentParam2DisplayValue = 0f;
 
     void OnGUI()
     {
@@ -67,10 +73,10 @@ public class SimRecorder : MonoBehaviour
             style.fontStyle = FontStyle.Bold;
             style.normal.textColor = Color.white;
 
-            string displayText = $"{parameterToRecord}: {currentParamDisplayValue:F2}";
+            string displayText = $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
 
-            GUI.Label(new Rect(22, 22, 500, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.black } });
-            GUI.Label(new Rect(20, 20, 500, 50), displayText, style);
+            GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.black } });
+            GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
         }
     }
     public void StartBatchRecording()
@@ -86,7 +92,7 @@ public class SimRecorder : MonoBehaviour
         isRecording = true;
 
         string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
-        string paramFolderName = parameterToRecord.ToString();
+        string paramFolderName = $"{parameterToRecord1}_vs_{parameterToRecord2}";
         string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
         string targetFolderPath = Path.Combine(baseFolderPath, paramFolderName, timestampFolder);
@@ -102,86 +108,92 @@ public class SimRecorder : MonoBehaviour
             uiController.showUI = false;
         }
 
-        for (int i = 0; i < paramIterations; i++)
+        for (int i = 0; i < param1Iterations; i++)
         {
-            float currentParam = paramStart + (i * paramStep);
-            currentParamDisplayValue = currentParam;
+            float currentParam1 = param1Start + (i * param1Step);
+            currentParam1DisplayValue = currentParam1;
 
-            // Set parameter via code
-            if (uiController != null)
+            for (int j = 0; j < param2Iterations; j++)
             {
-                uiController.SetParameter(parameterToRecord, currentParam);
-            }
+                float currentParam2 = param2Start + (j * param2Step);
+                currentParam2DisplayValue = currentParam2;
 
-            uiController.ResetScene();
+                // Set parameter via code
+                if (uiController != null)
+                {
+                    uiController.SetParameter(parameterToRecord1, currentParam1);
+                    uiController.SetParameter(parameterToRecord2, currentParam2);
+                }
 
-            // Start simulation
-            uiController.SetMotion(true);
+                uiController.ResetScene();
 
-            string fileName = $"{paramFolderName.ToLower()}_{currentParam:F2}";
+                // Start simulation
+                uiController.SetMotion(true);
 
-            SimulationConfig config = new SimulationConfig
-            {
-                variedParameter = paramFolderName,
-                variedParameterValue = currentParam,
-                cohesion = swarmManager.cohesionIntensity,
-                separation = swarmManager.separationIntensity,
-                alignment = swarmManager.alignmentIntensity,
-                friction = swarmManager.frictionIntensity,
-                randomMovement = swarmManager.randomMovementIntensity,
-                overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
-                safetyDistance = swarmManager.safetyDistance,
-                envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
-                perceptionRadius = swarmManager.perceptionRadius,
-                obstacleRadius = swarmManager.obstacleAvoidanceRadius,
-                maxSpeed = swarmManager.maxSpeed,
-                numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
-            };
-            string configJson = JsonUtility.ToJson(config, true);
-            File.WriteAllText(Path.Combine(targetFolderPath, fileName + "_config.json"), configJson);
+                string fileName = $"{parameterToRecord1.ToString().ToLower()}_{currentParam1:F2}_{parameterToRecord2.ToString().ToLower()}_{currentParam2:F2}";
+
+                SimulationConfig config = new SimulationConfig
+                {
+                    variedParameter = paramFolderName,
+                    variedParameterValue = currentParam1, // Storing one for backward compatibility or change if needed
+                    cohesion = swarmManager.cohesionIntensity,
+                    separation = swarmManager.separationIntensity,
+                    alignment = swarmManager.alignmentIntensity,
+                    friction = swarmManager.frictionIntensity,
+                    randomMovement = swarmManager.randomMovementIntensity,
+                    overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                    safetyDistance = swarmManager.safetyDistance,
+                    envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                    obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                    maxSpeed = swarmManager.maxSpeed,
+                    numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
+                };
+                string configJson = JsonUtility.ToJson(config, true);
+                File.WriteAllText(Path.Combine(targetFolderPath, fileName + "_config.json"), configJson);
 
 #if UNITY_EDITOR
-            var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
-            var recorderController = new RecorderController(controllerSettings);
+                var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+                var recorderController = new RecorderController(controllerSettings);
 
-            var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
-            videoRecorder.name = "My Video Recorder";
-            videoRecorder.Enabled = true;
-            videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
-            videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
+                var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+                videoRecorder.name = "My Video Recorder";
+                videoRecorder.Enabled = true;
+                videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+                videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
 
-            videoRecorder.ImageInputSettings = new GameViewInputSettings
-            {
-                OutputWidth = 1920,
-                OutputHeight = 1080
-            };
-            
-            videoRecorder.AudioInputSettings.PreserveAudio = false;
+                videoRecorder.ImageInputSettings = new GameViewInputSettings
+                {
+                    OutputWidth = 1920,
+                    OutputHeight = 1080
+                };
+                
+                videoRecorder.AudioInputSettings.PreserveAudio = false;
 
-            controllerSettings.AddRecorderSettings(videoRecorder);
-            controllerSettings.SetRecordModeToManual();
-            controllerSettings.FrameRate = 30;
+                controllerSettings.AddRecorderSettings(videoRecorder);
+                controllerSettings.SetRecordModeToManual();
+                controllerSettings.FrameRate = 30;
 
-            recorderController.PrepareRecording();
-            recorderController.StartRecording();
+                recorderController.PrepareRecording();
+                recorderController.StartRecording();
 #else
-            Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
+                Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-            float timer = 0f;
+                float timer = 0f;
 
-            while (timer < recordingTimePerSim)
-            {
-                yield return new WaitForEndOfFrame();
-                timer += Time.deltaTime;
-            }
+                while (timer < recordingTimePerSim)
+                {
+                    yield return new WaitForEndOfFrame();
+                    timer += Time.deltaTime;
+                }
 
 #if UNITY_EDITOR
-            recorderController.StopRecording();
+                recorderController.StopRecording();
 #endif
 
-            uiController.SetMotion(false);
-            Debug.Log($"[SimRecorder] Saved video sequence to {targetFolderPath}/{fileName}.mp4");
+                uiController.SetMotion(false);
+                Debug.Log($"[SimRecorder] Saved video sequence to {targetFolderPath}/{fileName}.mp4");
+            }
         }
 
         // Restore UI

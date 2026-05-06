@@ -299,7 +299,6 @@ public class UI : MonoBehaviour
             case SwarmParameterToRecord.OverlapAvoidance: uiOverlapAvoid = value; break;
             case SwarmParameterToRecord.SafetyDistance: uiSafetyDist = value; break;
             case SwarmParameterToRecord.EnvAvoidance: uiEnvAvoid = value; break;
-            case SwarmParameterToRecord.PerceptionRadius: uiPerceptionRad = value; break;
             case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
             case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
         }
