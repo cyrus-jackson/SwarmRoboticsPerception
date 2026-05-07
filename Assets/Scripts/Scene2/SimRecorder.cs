@@ -36,6 +36,7 @@ public class SimRecorder : MonoBehaviour
         public string parameter2;
         public float parameter2Value;
         public string obstacleName;
+        public string obstacleSpawnLocationName;
         public float perceptionRadius;
         public float cohesion;
         public float separation;
@@ -90,7 +91,9 @@ public class SimRecorder : MonoBehaviour
     private float currentParam1DisplayValue = 0f;
     private float currentParam2DisplayValue = 0f;
     private string currentObstacleDisplayName = "";
+    private string currentSpawnLocationDisplayName = "";
     private bool isObstacleBatchMode = false;
+    private bool isObstacleSpawnBatchMode = false;
 
     void OnGUI()
     {
@@ -101,9 +104,19 @@ public class SimRecorder : MonoBehaviour
             style.fontStyle = FontStyle.Bold;
             style.normal.textColor = Color.white;
 
-            string displayText = isObstacleBatchMode
-                ? $"Obstacle: {currentObstacleDisplayName} | {obstacleBatchParameter}: {currentParam1DisplayValue:F2}"
-                : $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
+            string displayText;
+            if (isObstacleSpawnBatchMode)
+            {
+                displayText = $"Obstacle: {currentObstacleDisplayName} | Spawn: {currentSpawnLocationDisplayName}";
+            }
+            else if (isObstacleBatchMode)
+            {
+                displayText = $"Obstacle: {currentObstacleDisplayName} | {obstacleBatchParameter}: {currentParam1DisplayValue:F2}";
+            }
+            else
+            {
+                displayText = $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
+            }
 
             GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.black } });
             GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
@@ -125,10 +138,19 @@ public class SimRecorder : MonoBehaviour
         }
     }
 
+    public void StartObstacleSpawnLocationBatchRecording()
+    {
+        if (!isRecording)
+        {
+            StartCoroutine(ObstacleSpawnLocationBatchRecordCoroutine());
+        }
+    }
+
     private IEnumerator BatchRecordCoroutine()
     {
         isRecording = true;
         isObstacleBatchMode = false;
+        isObstacleSpawnBatchMode = false;
 
         string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
         string paramFolderName = $"{parameterToRecord1}_vs_{parameterToRecord2}";
@@ -274,6 +296,7 @@ public class SimRecorder : MonoBehaviour
     {
         isRecording = true;
         isObstacleBatchMode = true;
+        isObstacleSpawnBatchMode = false;
 
         if (uiController == null || swarmManager == null)
         {
@@ -425,6 +448,180 @@ public class SimRecorder : MonoBehaviour
         isRecording = false;
         isObstacleBatchMode = false;
         Debug.Log("[SimRecorder] Obstacle batch recording finished.");
+    }
+
+    private IEnumerator ObstacleSpawnLocationBatchRecordCoroutine()
+    {
+        isRecording = true;
+        isObstacleBatchMode = false;
+        isObstacleSpawnBatchMode = true;
+
+        if (uiController == null || swarmManager == null)
+        {
+            Debug.LogError("[SimRecorder] Missing uiController or swarmManager; cannot start obstacle/spawn-location batch recording.");
+            isRecording = false;
+            isObstacleSpawnBatchMode = false;
+            yield break;
+        }
+
+        if (uiController.obstacles == null || uiController.obstacles.Count == 0)
+        {
+            Debug.LogWarning("[SimRecorder] UI obstacle list is empty; nothing to record.");
+            isRecording = false;
+            isObstacleSpawnBatchMode = false;
+            yield break;
+        }
+
+        if (uiController.obstacleSpawnLocations == null || uiController.obstacleSpawnLocations.Count == 0)
+        {
+            Debug.LogWarning("[SimRecorder] UI obstacle spawn locations list is empty; nothing to record.");
+            isRecording = false;
+            isObstacleSpawnBatchMode = false;
+            yield break;
+        }
+
+        // Snapshot lists so we can restore them afterward.
+        List<Transform> originalObstacles = new List<Transform>(uiController.obstacles);
+        List<Transform> originalSpawnLocations = new List<Transform>(uiController.obstacleSpawnLocations);
+
+        string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
+        string paramFolderName = "Obstacle_x_SpawnLocation";
+        string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string targetFolderPath = Path.Combine(baseFolderPath, paramFolderName, timestampFolder);
+
+        if (!Directory.Exists(targetFolderPath))
+        {
+            Directory.CreateDirectory(targetFolderPath);
+        }
+
+        // Hide UI
+        uiController.showUI = false;
+
+        List<SimulationConfig> simulations = new List<SimulationConfig>();
+
+        for (int obstacleIndex = 0; obstacleIndex < originalObstacles.Count; obstacleIndex++)
+        {
+            Transform obstacle = originalObstacles[obstacleIndex];
+            if (obstacle == null) continue;
+
+            currentObstacleDisplayName = obstacle.name;
+            uiController.SetDefaultObstacle(obstacle);
+
+            for (int spawnIndex = 0; spawnIndex < originalSpawnLocations.Count; spawnIndex++)
+            {
+                Transform spawn = originalSpawnLocations[spawnIndex];
+                if (spawn == null) continue;
+
+                currentSpawnLocationDisplayName = spawn.name;
+                uiController.SetDefaultObstacleSpawnLocation(spawn);
+
+                uiController.ResetScene();
+                uiController.SetMotion(true);
+
+                string obstacleSafe = SanitizeFileName(obstacle.name);
+                string spawnSafe = SanitizeFileName(spawn.name);
+                string fileName = $"obstacle_{obstacleSafe}_spawn_{spawnSafe}";
+                fileName = SanitizeFileName(fileName);
+
+                SimulationConfig config = new SimulationConfig
+                {
+                    fileName = fileName,
+                    variedParameter = paramFolderName,
+                    variedParameterValue = (obstacleIndex * 100f) + spawnIndex,
+                    parameter1 = "Obstacle",
+                    parameter1Value = obstacleIndex,
+                    parameter2 = "SpawnLocation",
+                    parameter2Value = spawnIndex,
+                    obstacleName = obstacle.name,
+                    obstacleSpawnLocationName = spawn.name,
+                    perceptionRadius = swarmManager.perceptionRadius,
+                    cohesion = swarmManager.cohesionIntensity,
+                    separation = swarmManager.separationIntensity,
+                    alignment = swarmManager.alignmentIntensity,
+                    friction = swarmManager.frictionIntensity,
+                    randomMovement = swarmManager.randomMovementIntensity,
+                    overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                    safetyDistance = swarmManager.safetyDistance,
+                    envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                    obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                    maxSpeed = swarmManager.maxSpeed,
+                    numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
+                };
+
+                simulations.Add(config);
+
+#if UNITY_EDITOR
+                var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+                var recorderController = new RecorderController(controllerSettings);
+
+                var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+                videoRecorder.name = "My Video Recorder";
+                videoRecorder.Enabled = true;
+                videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+                videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
+
+                videoRecorder.ImageInputSettings = new GameViewInputSettings
+                {
+                    OutputWidth = 1920,
+                    OutputHeight = 1080
+                };
+
+                videoRecorder.AudioInputSettings.PreserveAudio = false;
+
+                controllerSettings.AddRecorderSettings(videoRecorder);
+                controllerSettings.SetRecordModeToManual();
+                controllerSettings.FrameRate = 30;
+
+                recorderController.PrepareRecording();
+                recorderController.StartRecording();
+#else
+                Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
+#endif
+
+                float timer = 0f;
+                while (timer < recordingTimePerSim)
+                {
+                    yield return new WaitForEndOfFrame();
+                    timer += Time.deltaTime;
+                }
+
+#if UNITY_EDITOR
+                recorderController.StopRecording();
+#endif
+
+                uiController.SetMotion(false);
+                Debug.Log($"[SimRecorder] Saved obstacle/spawn batch video to {targetFolderPath}/{fileName}.mp4");
+            }
+        }
+
+        // Write a single config for the whole folder.
+        {
+            BatchConfig batchConfig = new BatchConfig
+            {
+                batchType = "obstacles+spawn-locations",
+                folderName = paramFolderName,
+                timestamp = timestampFolder,
+                recordingTimePerSim = recordingTimePerSim,
+                saveFolder = saveFolder,
+                simulations = simulations.ToArray()
+            };
+
+            string configJson = JsonUtility.ToJson(batchConfig, true);
+            File.WriteAllText(Path.Combine(targetFolderPath, "batch_config.json"), configJson);
+        }
+
+        // Restore lists and UI
+        uiController.obstacles.Clear();
+        uiController.obstacles.AddRange(originalObstacles);
+        uiController.obstacleSpawnLocations.Clear();
+        uiController.obstacleSpawnLocations.AddRange(originalSpawnLocations);
+
+        uiController.showUI = true;
+        uiController.SetMotion(false);
+
+        isRecording = false;
+        isObstacleSpawnBatchMode = false;
+        Debug.Log("[SimRecorder] Obstacle/spawn-location batch recording finished.");
     }
 
     private static string SanitizeFileName(string name)

@@ -233,6 +233,19 @@ public class UI : MonoBehaviour
                 recorder.StartObstacleBatchRecording();
             }
         }
+
+        if (GUILayout.Button("Batch Record Obstacles x SpawnLocations"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartObstacleSpawnLocationBatchRecording();
+            }
+        }
     }
 
     float DrawSlider(string label, float val, float min, float max, bool isInt = false)
@@ -799,25 +812,25 @@ public class UI : MonoBehaviour
         Transform spawn = GetDefaultObstacleSpawnLocation();
         if (obstacle == null || spawn == null) return;
 
-        Rigidbody2D rb2D = obstacle.GetComponent<Rigidbody2D>();
-        if (rb2D != null)
-        {
-            Vector3 p = spawn.position;
-            rb2D.position = new Vector2(p.x, p.y);
-            rb2D.rotation = spawn.eulerAngles.z;
-            return;
-        }
-
-        Rigidbody rb3D = obstacle.GetComponent<Rigidbody>();
-        if (rb3D != null)
-        {
-            rb3D.position = spawn.position;
-            rb3D.rotation = spawn.rotation;
-            return;
-        }
-
+        // Always move the obstacle root.
         obstacle.position = spawn.position;
         obstacle.rotation = spawn.rotation;
+
+        // If any rigidbodies exist on the obstacle hierarchy (common if collider is on a child),
+        // sync them too so physics/colliders match the transform you see.
+        Rigidbody2D rb2D = obstacle.GetComponent<Rigidbody2D>();
+        if (rb2D == null) rb2D = obstacle.GetComponentInChildren<Rigidbody2D>();
+        if (rb2D != null)
+        {
+            Vector3 p = rb2D.transform.position;
+            rb2D.position = new Vector2(p.x, p.y);
+            rb2D.rotation = rb2D.transform.eulerAngles.z;
+            rb2D.linearVelocity = Vector2.zero;
+            rb2D.angularVelocity = 0f;
+        }
+
+        // Ensure collider bounds update immediately (avoids a one-frame mismatch).
+        Physics2D.SyncTransforms();
     }
 
     private void SyncDefaultObstacleActiveState()
