@@ -19,8 +19,13 @@ public class UI : MonoBehaviour
     [Tooltip("List of possible spawn areas in the scene")]
     public Transform[] spawnAreas;
 
-    [Tooltip("List of possible obstacles in the scene")]
-    public Transform[] obstacles;
+    [Header("Obstacle Setup")]
+    [Tooltip("Obstacles in the scene. Only element 0 is treated as the default obstacle.")]
+    public List<Transform> obstacles = new List<Transform>();
+
+    [Header("Obstacle Spawn Setup")]
+    [Tooltip("Possible spawn locations for the default obstacle.")]
+    public List<Transform> obstacleSpawnLocations = new List<Transform>();
 
     [Tooltip("List of possible common fates in the scene")]
     public Transform[] commonFates;
@@ -28,22 +33,16 @@ public class UI : MonoBehaviour
     [Header("Dispersion Setup")]
     [Tooltip("The circular spawn area for Dispersion type")]
     public Transform circleSpawnArea;
-    [Tooltip("The obstacle specifically for Dispersion type")]
-    public Transform dispersionObstacle;
 
     [Header("Densification Setup")]
     [Tooltip("The spawn area specifically for Densification type")]
     public Transform densificationSpawnArea;
-    [Tooltip("The obstacle specifically for Densification type")]
-    public Transform densificationObstacle;
     [Tooltip("The common fate specifically for Densification type")]
     public Transform densificationCommonFate;
 
     [Header("Flocking Setup")]
     [Tooltip("The spawn area specifically for Flocking type")]
     public Transform flockingSpawnArea;
-    [Tooltip("The obstacle specifically for Flocking type")]
-    public Transform flockingObstacle;
     [Tooltip("The common fate specifically for Flocking type")]
     public Transform flockingCommonFate;
 
@@ -55,7 +54,6 @@ public class UI : MonoBehaviour
     // UI Configuration values
     private SwarmType selectedSwarmType = SwarmType.Densification;
     private int selectedSpawnAreaIndex = 0;
-    private int selectedObstacleIndex = 0;
     private int selectedCommonFateIndex = 0;
 
     private float uiCohesion = 5.0f;
@@ -66,10 +64,10 @@ public class UI : MonoBehaviour
 
     private float uiOverlapAvoid = 20.0f;
     private float uiSafetyDist = 0.2f;
-    private float uiEnvAvoid = 40.0f;
+    private float uiEnvAvoid = 20.0f;
 
     private float uiPerceptionRad = 0.2f;
-    private float uiObstacleRad = 1.8f;
+    private float uiObstacleRad = 0.1f;
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = true;
     private Vector2 scrollPosition;
@@ -107,7 +105,7 @@ public class UI : MonoBehaviour
                 uiSeparation = 1f;
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.8f;
+                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
@@ -116,7 +114,7 @@ public class UI : MonoBehaviour
                 uiSeparation = 1.0f;
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.8f;
+                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
@@ -124,7 +122,7 @@ public class UI : MonoBehaviour
                 uiCohesion = 0.0f;
                 uiSeparation = 0.0f;
                 uiAlignment = 0.0f;
-                uiObstacleRad = 0.8f;
+                uiObstacleRad = 0.1f;
                 uiRandomMvmt = 20.0f;
                 uiPerceptionRad = 3.2f;
                 break;
@@ -133,7 +131,7 @@ public class UI : MonoBehaviour
                 uiSeparation = 5.0f;
                 uiAlignment = 0.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.8f;
+                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 2.0f;
                 break;
@@ -170,45 +168,6 @@ public class UI : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
-        // if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
-        // {
-        //     GUILayout.Space(5);
-        //     string typeName = selectedSwarmType.ToString();
-        //     GUILayout.Label($"<i>Using designated elements for {typeName}</i>");
-        // }
-        // else
-        // {
-        //     if (spawnAreas != null && spawnAreas.Length > 0)
-        //     {
-        //         GUILayout.BeginHorizontal();
-        //         GUILayout.Label("Spawn Area:", GUILayout.Width(80));
-        //         string[] areaNames = new string[spawnAreas.Length];
-        //         for (int i = 0; i < spawnAreas.Length; i++) areaNames[i] = spawnAreas[i] != null ? spawnAreas[i].name : "None";
-        //         selectedSpawnAreaIndex = GUILayout.SelectionGrid(selectedSpawnAreaIndex, areaNames, 2);
-        //         GUILayout.EndHorizontal();
-        //     }
-
-        //     if (obstacles != null && obstacles.Length > 0)
-        //     {
-        //         GUILayout.BeginHorizontal();
-        //         GUILayout.Label("Obstacle:", GUILayout.Width(80));
-        //         string[] obsNames = new string[obstacles.Length];
-        //         for (int i = 0; i < obstacles.Length; i++) obsNames[i] = obstacles[i] != null ? obstacles[i].name : "None";
-        //         selectedObstacleIndex = GUILayout.SelectionGrid(selectedObstacleIndex, obsNames, 2);
-        //         GUILayout.EndHorizontal();
-        //     }
-
-        //     if (commonFates != null && commonFates.Length > 0)
-        //     {
-        //         GUILayout.BeginHorizontal();
-        //         GUILayout.Label("Cmmn Fate:", GUILayout.Width(80));
-        //         string[] fateNames = new string[commonFates.Length];
-        //         for (int i = 0; i < commonFates.Length; i++) fateNames[i] = commonFates[i] != null ? commonFates[i].name : "None";
-        //         selectedCommonFateIndex = GUILayout.SelectionGrid(selectedCommonFateIndex, fateNames, 2);
-        //         GUILayout.EndHorizontal();
-        //     }
-        // }
-
         GUILayout.Space(10);
         GUILayout.Label("<b>Swarm Parameters</b>");
 
@@ -222,7 +181,7 @@ public class UI : MonoBehaviour
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
         uiSafetyDist = DrawSlider("Safety Dist", uiSafetyDist, 0.1f, 5f);
-        uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 50);
+        uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 500);
 
         GUILayout.Label("<b>Perception</b>");
         uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0, 10);
@@ -259,6 +218,19 @@ public class UI : MonoBehaviour
                 recorder.uiController = this;
                 if (swarmManager != null) recorder.swarmManager = swarmManager;
                 recorder.StartBatchRecording();
+            }
+        }
+
+        if (GUILayout.Button("Batch Record Obstacles (0th used)"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartObstacleBatchRecording();
             }
         }
     }
@@ -299,6 +271,7 @@ public class UI : MonoBehaviour
             case SwarmParameterToRecord.OverlapAvoidance: uiOverlapAvoid = value; break;
             case SwarmParameterToRecord.SafetyDistance: uiSafetyDist = value; break;
             case SwarmParameterToRecord.EnvAvoidance: uiEnvAvoid = value; break;
+            case SwarmParameterToRecord.PerceptionRad: uiPerceptionRad = value; break;
             case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
             case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
         }
@@ -329,104 +302,81 @@ public class UI : MonoBehaviour
 
         swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
 
-        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
+        Transform defaultObstacle = GetDefaultObstacle();
+        if (defaultObstacle != null)
         {
-            if (dispersionObstacle != null)
+            // Keep only the default obstacle active to avoid confusion.
+            for (int i = 0; i < obstacles.Count; i++)
             {
-                dispersionObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Dispersion);
-                if (selectedSwarmType == SwarmType.Dispersion) swarmManager.centralObstacle = dispersionObstacle;
-            }
-            if (densificationObstacle != null)
-            {
-                densificationObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Densification);
-                if (selectedSwarmType == SwarmType.Densification) swarmManager.centralObstacle = densificationObstacle;
-            }
-            if (flockingObstacle != null)
-            {
-                flockingObstacle.gameObject.SetActive(selectedSwarmType == SwarmType.Flocking);
-                if (selectedSwarmType == SwarmType.Flocking) swarmManager.centralObstacle = flockingObstacle;
+                if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == 0);
             }
 
-            if (densificationCommonFate != null)
-            {
-                densificationCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Densification);
-                if (selectedSwarmType == SwarmType.Densification)
-                {
-                    swarmManager.commonFateTarget = densificationCommonFate;
-                    swarmManager.commonFateCollider = densificationCommonFate.GetComponent<Collider2D>();
-                }
-            }
-            if (flockingCommonFate != null)
-            {
-                flockingCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Flocking);
-                if (selectedSwarmType == SwarmType.Flocking)
-                {
-                    swarmManager.commonFateTarget = flockingCommonFate;
-                    swarmManager.commonFateCollider = flockingCommonFate.GetComponent<Collider2D>();
-                }
-            }
-            if (selectedSwarmType == SwarmType.Dispersion)
-            {
-                swarmManager.commonFateTarget = null;
-                swarmManager.commonFateCollider = null;
-            }
-
-            // Hide other obstacles
+            swarmManager.centralObstacle = defaultObstacle;
+        }
+        else
+        {
             if (obstacles != null)
             {
-                for (int i = 0; i < obstacles.Length; i++)
+                for (int i = 0; i < obstacles.Count; i++)
                 {
                     if (obstacles[i] != null) obstacles[i].gameObject.SetActive(false);
                 }
             }
+            swarmManager.centralObstacle = null;
+        }
 
-            // Hide other common fates
-            if (commonFates != null)
+        // Common fate handling (kept as-is; only obstacle is unified).
+        if (densificationCommonFate != null)
+        {
+            densificationCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Densification);
+            if (selectedSwarmType == SwarmType.Densification)
             {
-                for (int i = 0; i < commonFates.Length; i++)
-                {
-                    if (commonFates[i] != null) commonFates[i].gameObject.SetActive(false);
-                }
+                swarmManager.commonFateTarget = densificationCommonFate;
+                swarmManager.commonFateCollider = densificationCommonFate.GetComponent<Collider2D>();
             }
         }
-        else
+
+        if (flockingCommonFate != null)
         {
-            if (dispersionObstacle != null) dispersionObstacle.gameObject.SetActive(false);
-            if (densificationObstacle != null) densificationObstacle.gameObject.SetActive(false);
-            if (densificationCommonFate != null) densificationCommonFate.gameObject.SetActive(false);
-
-            if (flockingObstacle != null) flockingObstacle.gameObject.SetActive(false);
-            if (flockingCommonFate != null) flockingCommonFate.gameObject.SetActive(false);
-
-            if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length)
+            flockingCommonFate.gameObject.SetActive(selectedSwarmType == SwarmType.Flocking);
+            if (selectedSwarmType == SwarmType.Flocking)
             {
-                swarmManager.centralObstacle = obstacles[selectedObstacleIndex];
-
-                // toggle active state of obstacles so only selected is visible
-                for (int i = 0; i < obstacles.Length; i++)
-                {
-                    if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == selectedObstacleIndex);
-                }
+                swarmManager.commonFateTarget = flockingCommonFate;
+                swarmManager.commonFateCollider = flockingCommonFate.GetComponent<Collider2D>();
             }
+        }
 
+        if (selectedSwarmType == SwarmType.Dispersion)
+        {
+            swarmManager.commonFateTarget = null;
+            swarmManager.commonFateCollider = null;
+        }
+        else if (selectedSwarmType != SwarmType.Densification && selectedSwarmType != SwarmType.Flocking)
+        {
             if (commonFates != null && commonFates.Length > 0 && selectedCommonFateIndex < commonFates.Length)
             {
                 swarmManager.commonFateTarget = commonFates[selectedCommonFateIndex];
-                if (swarmManager.commonFateTarget != null)
-                {
-                    swarmManager.commonFateCollider = swarmManager.commonFateTarget.GetComponent<Collider2D>();
-                }
-
-                // toggle active state of common fates so only selected is visible
-                for (int i = 0; i < commonFates.Length; i++)
-                {
-                    if (commonFates[i] != null) commonFates[i].gameObject.SetActive(i == selectedCommonFateIndex);
-                }
+                swarmManager.commonFateCollider = swarmManager.commonFateTarget != null
+                    ? swarmManager.commonFateTarget.GetComponent<Collider2D>()
+                    : null;
             }
             else
             {
                 swarmManager.commonFateTarget = null;
                 swarmManager.commonFateCollider = null;
+            }
+        }
+
+        // Ensure only the relevant common fate is visible.
+        if (commonFates != null)
+        {
+            for (int i = 0; i < commonFates.Length; i++)
+            {
+                if (commonFates[i] == null) continue;
+                bool shouldShow = (selectedSwarmType != SwarmType.Densification && selectedSwarmType != SwarmType.Flocking)
+                    && i == selectedCommonFateIndex
+                    && swarmManager.commonFateTarget == commonFates[i];
+                commonFates[i].gameObject.SetActive(shouldShow);
             }
         }
     }
@@ -436,6 +386,9 @@ public class UI : MonoBehaviour
         isRunning = false;
         if (swarmManager != null)
             swarmManager.enabled = false;
+
+        SyncDefaultObstacleActiveState();
+        PlaceDefaultObstacleAtDefaultSpawnLocation();
 
         foreach (var agent in activeAgents)
         {
@@ -507,11 +460,7 @@ public class UI : MonoBehaviour
 
         Vector3 center = activeSpawnArea.position;
 
-        Transform activeObstacle = null;
-        if (selectedSwarmType == SwarmType.Dispersion) activeObstacle = dispersionObstacle;
-        else if (selectedSwarmType == SwarmType.Densification) activeObstacle = densificationObstacle;
-        else if (selectedSwarmType == SwarmType.Flocking) activeObstacle = flockingObstacle;
-        else if (obstacles != null && obstacles.Length > 0 && selectedObstacleIndex < obstacles.Length) activeObstacle = obstacles[selectedObstacleIndex];
+        Transform activeObstacle = GetDefaultObstacle();
 
         if (selectedSwarmType == SwarmType.Dispersion)
         {
@@ -532,10 +481,7 @@ public class UI : MonoBehaviour
                 Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                 bool valid = true;
-                if (activeObstacle != null && Vector3.Distance(spawnPos, activeObstacle.position) < uiObstacleRad + 2)
-                {
-                    valid = false;
-                }
+                if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
 
                 if (valid)
                 {
@@ -574,10 +520,7 @@ public class UI : MonoBehaviour
                         Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                         bool valid = true;
-                        if (activeObstacle != null && Vector3.Distance(spawnPos, activeObstacle.position) < uiObstacleRad + 2)
-                        {
-                            valid = false;
-                        }
+                        if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
 
                         if (valid)
                         {
@@ -609,30 +552,281 @@ public class UI : MonoBehaviour
     {
         Gizmos.color = Color.blue;
 
-        if (obstacles != null)
+        Transform defaultObstacle = GetDefaultObstacle();
+        if (defaultObstacle != null) DrawObstacleGizmos(defaultObstacle, uiObstacleRad);
+    }
+
+    private bool IsTooCloseToObstacle(Vector3 point, Transform obstacleTransform, float padding)
+    {
+        if (obstacleTransform == null) return false;
+        padding = Mathf.Max(0f, padding);
+
+        // Prefer colliders (shape-aware).
+        Collider2D collider2D = obstacleTransform.GetComponent<Collider2D>();
+        if (collider2D != null)
         {
-            foreach (Transform obs in obstacles)
+            Vector2 p2 = new Vector2(point.x, point.y);
+            if (collider2D.OverlapPoint(p2)) return true;
+            Vector2 closest = collider2D.ClosestPoint(p2);
+            float dist = Vector2.Distance(p2, closest);
+            return dist < padding;
+        }
+
+        Collider collider3D = obstacleTransform.GetComponent<Collider>();
+        if (collider3D != null)
+        {
+            if (collider3D.bounds.Contains(point))
             {
-                if (obs != null)
+                // Fast-path; not perfect for concave meshes but fine for typical primitives.
+                // ClosestPoint will still be used for the distance check.
+            }
+            Vector3 closest = collider3D.ClosestPoint(point);
+            float dist = Vector3.Distance(point, closest);
+            if (dist == 0f) return true;
+            return dist < padding;
+        }
+
+        // Fallback: approximate by distance to transform position.
+        return Vector3.Distance(point, obstacleTransform.position) < padding;
+    }
+
+    private void DrawObstacleGizmos(Transform obstacleTransform, float padding)
+    {
+        if (obstacleTransform == null) return;
+
+        // 2D colliders
+        Collider2D collider2D = obstacleTransform.GetComponent<Collider2D>();
+        if (collider2D != null)
+        {
+            DrawCollider2DGizmos(collider2D, Mathf.Max(0f, padding));
+            return;
+        }
+
+        // 3D colliders
+        Collider collider3D = obstacleTransform.GetComponent<Collider>();
+        if (collider3D != null)
+        {
+            DrawCollider3DGizmos(collider3D, Mathf.Max(0f, padding));
+            return;
+        }
+
+        // Fallback
+        Gizmos.DrawWireSphere(obstacleTransform.position, Mathf.Max(0f, padding));
+    }
+
+    private void DrawCollider2DGizmos(Collider2D col, float padding)
+    {
+        if (col is CircleCollider2D circle)
+        {
+            Vector3 center = circle.transform.TransformPoint(circle.offset);
+            float scale = Mathf.Max(Mathf.Abs(circle.transform.lossyScale.x), Mathf.Abs(circle.transform.lossyScale.y));
+            float radius = circle.radius * scale + padding;
+            Gizmos.DrawWireSphere(center, radius);
+            return;
+        }
+
+        if (col is BoxCollider2D box)
+        {
+            Vector3 center = box.transform.TransformPoint(box.offset);
+            Vector3 lossy = box.transform.lossyScale;
+            Vector2 sizeWorld = new Vector2(box.size.x * Mathf.Abs(lossy.x), box.size.y * Mathf.Abs(lossy.y));
+            Vector3 size = new Vector3(sizeWorld.x + 2f * padding, sizeWorld.y + 2f * padding, 0.01f);
+
+            Matrix4x4 old = Gizmos.matrix;
+            Gizmos.matrix = Matrix4x4.TRS(center, box.transform.rotation, Vector3.one);
+            Gizmos.DrawWireCube(Vector3.zero, size);
+            Gizmos.matrix = old;
+            return;
+        }
+
+        if (col is CapsuleCollider2D capsule)
+        {
+            // Approximate capsule by drawing an expanded bounds box.
+            Bounds b = capsule.bounds;
+            Vector3 size = b.size + new Vector3(2f * padding, 2f * padding, 0.01f);
+            Gizmos.DrawWireCube(b.center, size);
+            return;
+        }
+
+        if (col is PolygonCollider2D poly)
+        {
+            // Draw the polygon outline.
+            for (int p = 0; p < poly.pathCount; p++)
+            {
+                Vector2[] path = poly.GetPath(p);
+                if (path == null || path.Length < 2) continue;
+
+                for (int i = 0; i < path.Length; i++)
                 {
-                    Gizmos.DrawWireSphere(obs.position, uiObstacleRad);
+                    Vector3 a = poly.transform.TransformPoint(path[i]);
+                    Vector3 b = poly.transform.TransformPoint(path[(i + 1) % path.Length]);
+                    Gizmos.DrawLine(a, b);
                 }
             }
+
+            // Padding visualization: expanded bounds.
+            if (padding > 0f)
+            {
+                Bounds b = poly.bounds;
+                Gizmos.DrawWireCube(b.center, b.size + new Vector3(2f * padding, 2f * padding, 0.01f));
+            }
+            return;
         }
 
-        if (dispersionObstacle != null)
+        if (col is EdgeCollider2D edge)
         {
-            Gizmos.DrawWireSphere(dispersionObstacle.position, uiObstacleRad);
+            Vector2[] pts = edge.points;
+            if (pts != null && pts.Length >= 2)
+            {
+                for (int i = 0; i < pts.Length - 1; i++)
+                {
+                    Vector3 a = edge.transform.TransformPoint(pts[i] + edge.offset);
+                    Vector3 b = edge.transform.TransformPoint(pts[i + 1] + edge.offset);
+                    Gizmos.DrawLine(a, b);
+                }
+            }
+            if (padding > 0f)
+            {
+                Bounds b = edge.bounds;
+                Gizmos.DrawWireCube(b.center, b.size + new Vector3(2f * padding, 2f * padding, 0.01f));
+            }
+            return;
         }
 
-        if (densificationObstacle != null)
+        // Generic fallback: bounds.
         {
-            Gizmos.DrawWireSphere(densificationObstacle.position, uiObstacleRad);
+            Bounds b = col.bounds;
+            Gizmos.DrawWireCube(b.center, b.size + new Vector3(2f * padding, 2f * padding, 0.01f));
+        }
+    }
+
+    private void DrawCollider3DGizmos(Collider col, float padding)
+    {
+        if (col is SphereCollider sphere)
+        {
+            Vector3 center = sphere.transform.TransformPoint(sphere.center);
+            float scale = Mathf.Max(
+                Mathf.Abs(sphere.transform.lossyScale.x),
+                Mathf.Abs(sphere.transform.lossyScale.y),
+                Mathf.Abs(sphere.transform.lossyScale.z));
+            float radius = sphere.radius * scale + padding;
+            Gizmos.DrawWireSphere(center, radius);
+            return;
         }
 
-        if (flockingObstacle != null)
+        if (col is BoxCollider box)
         {
-            Gizmos.DrawWireSphere(flockingObstacle.position, uiObstacleRad);
+            Vector3 center = box.transform.TransformPoint(box.center);
+            Vector3 lossy = box.transform.lossyScale;
+            Vector3 sizeWorld = new Vector3(
+                box.size.x * Mathf.Abs(lossy.x),
+                box.size.y * Mathf.Abs(lossy.y),
+                box.size.z * Mathf.Abs(lossy.z));
+            Vector3 size = sizeWorld + Vector3.one * (2f * padding);
+
+            Matrix4x4 old = Gizmos.matrix;
+            Gizmos.matrix = Matrix4x4.TRS(center, box.transform.rotation, Vector3.one);
+            Gizmos.DrawWireCube(Vector3.zero, size);
+            Gizmos.matrix = old;
+            return;
+        }
+
+        if (col is CapsuleCollider capsule)
+        {
+            // Approximate by expanded bounds.
+            Bounds b = capsule.bounds;
+            Gizmos.DrawWireCube(b.center, b.size + Vector3.one * (2f * padding));
+            return;
+        }
+
+        // MeshCollider or anything else: expanded bounds.
+        {
+            Bounds b = col.bounds;
+            Gizmos.DrawWireCube(b.center, b.size + Vector3.one * (2f * padding));
+        }
+    }
+
+    private Transform GetDefaultObstacle()
+    {
+        if (obstacles == null || obstacles.Count == 0) return null;
+        return obstacles[0];
+    }
+
+    private Transform GetDefaultObstacleSpawnLocation()
+    {
+        if (obstacleSpawnLocations == null || obstacleSpawnLocations.Count == 0) return null;
+        return obstacleSpawnLocations[0];
+    }
+
+    public void SetDefaultObstacleSpawnLocation(Transform newDefaultSpawnLocation)
+    {
+        if (obstacleSpawnLocations == null) obstacleSpawnLocations = new List<Transform>();
+
+        if (newDefaultSpawnLocation == null)
+        {
+            if (obstacleSpawnLocations.Count > 0) obstacleSpawnLocations[0] = null;
+            return;
+        }
+
+        obstacleSpawnLocations.Remove(newDefaultSpawnLocation);
+        obstacleSpawnLocations.Insert(0, newDefaultSpawnLocation);
+
+        PlaceDefaultObstacleAtDefaultSpawnLocation();
+    }
+
+    public void SetDefaultObstacle(Transform newDefaultObstacle)
+    {
+        if (obstacles == null) obstacles = new List<Transform>();
+
+        if (newDefaultObstacle == null)
+        {
+            if (obstacles.Count > 0) obstacles[0] = null;
+            return;
+        }
+
+        // Ensure the requested obstacle becomes index 0.
+        obstacles.Remove(newDefaultObstacle);
+        obstacles.Insert(0, newDefaultObstacle);
+
+        SyncDefaultObstacleActiveState();
+        PlaceDefaultObstacleAtDefaultSpawnLocation();
+        if (swarmManager != null) swarmManager.centralObstacle = GetDefaultObstacle();
+    }
+
+    private void PlaceDefaultObstacleAtDefaultSpawnLocation()
+    {
+        Transform obstacle = GetDefaultObstacle();
+        Transform spawn = GetDefaultObstacleSpawnLocation();
+        if (obstacle == null || spawn == null) return;
+
+        Rigidbody2D rb2D = obstacle.GetComponent<Rigidbody2D>();
+        if (rb2D != null)
+        {
+            Vector3 p = spawn.position;
+            rb2D.position = new Vector2(p.x, p.y);
+            rb2D.rotation = spawn.eulerAngles.z;
+            return;
+        }
+
+        Rigidbody rb3D = obstacle.GetComponent<Rigidbody>();
+        if (rb3D != null)
+        {
+            rb3D.position = spawn.position;
+            rb3D.rotation = spawn.rotation;
+            return;
+        }
+
+        obstacle.position = spawn.position;
+        obstacle.rotation = spawn.rotation;
+    }
+
+    private void SyncDefaultObstacleActiveState()
+    {
+        if (obstacles == null) return;
+
+        for (int i = 0; i < obstacles.Count; i++)
+        {
+            if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == 0);
         }
     }
 }
