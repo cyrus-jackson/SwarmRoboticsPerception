@@ -48,7 +48,7 @@ public class UI : MonoBehaviour
 
     public bool showUI = true;
     private bool isRunning = false;
-    private int uiNumberOfAgents = 40;
+    private int uiNumberOfAgents = 42;
     private List<GameObject> activeAgents = new List<GameObject>();
 
     // UI Configuration values
