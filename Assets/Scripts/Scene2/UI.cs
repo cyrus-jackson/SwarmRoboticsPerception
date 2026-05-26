@@ -10,6 +10,13 @@ public enum SwarmType
     Dispersion
 }
 
+public enum AgentSpawnType
+{
+    Grid,
+    Random,
+    Spiral
+}
+
 public class UI : MonoBehaviour
 {
     [Header("Swarm Setup")]
@@ -53,6 +60,7 @@ public class UI : MonoBehaviour
 
     // UI Configuration values
     private SwarmType selectedSwarmType = SwarmType.Densification;
+    private AgentSpawnType selectedSpawnType = AgentSpawnType.Grid;
     private int selectedSpawnAreaIndex = 0;
     private int selectedCommonFateIndex = 0;
 
@@ -61,6 +69,7 @@ public class UI : MonoBehaviour
     private float uiAlignment = 2.0f;
     private float uiFriction = 0.1f;
     private float uiRandomMvmt = 0.0f;
+    private float uiNeighbourSpread = 1.0f;
 
     private float uiOverlapAvoid = 20.0f;
     private float uiSafetyDist = 0.2f;
@@ -142,7 +151,7 @@ public class UI : MonoBehaviour
     {
         if (!showUI) return;
 
-        GUILayout.BeginArea(new Rect(20, 20, 350, Screen.height - 40), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(20, 20, 550, Screen.height - 40), GUI.skin.box);
         scrollPosition = GUILayout.BeginScrollView(scrollPosition);
 
         GUILayout.Label("Swarm Control UI (Press 'X' to hide)", GUI.skin.label);
@@ -168,10 +177,21 @@ public class UI : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Spawn:", GUILayout.Width(80));
+        AgentSpawnType newSpawnType = (AgentSpawnType)GUILayout.Toolbar((int)selectedSpawnType, System.Enum.GetNames(typeof(AgentSpawnType)));
+        if (newSpawnType != selectedSpawnType)
+        {
+            selectedSpawnType = newSpawnType;
+            ResetScene();
+        }
+        GUILayout.EndHorizontal();
+
         GUILayout.Space(10);
         GUILayout.Label("<b>Swarm Parameters</b>");
 
         uiNumberOfAgents = DrawSlider("Agents", uiNumberOfAgents, 4, 200, true);
+        uiNeighbourSpread = DrawSlider("Neighbour Spread", uiNeighbourSpread, 0.1f, 5.0f);
         uiCohesion = DrawSlider("Cohesion", uiCohesion, 0, 10);
         uiSeparation = DrawSlider("Separation", uiSeparation, 0, 10);
         uiAlignment = DrawSlider("Alignment", uiAlignment, 0, 10);
@@ -475,7 +495,7 @@ public class UI : MonoBehaviour
 
         Transform activeObstacle = GetDefaultObstacle();
 
-        if (selectedSwarmType == SwarmType.Dispersion)
+        if (selectedSpawnType == AgentSpawnType.Spiral)
         {
             // Spawn evenly spaced in a filled circle using Fermat's spiral
             float radius = Mathf.Max(activeSpawnArea.lossyScale.x, activeSpawnArea.lossyScale.y) / 2f;
@@ -503,6 +523,46 @@ public class UI : MonoBehaviour
                     spawned++;
                 }
                 i++;
+            }
+        }
+        else if (selectedSpawnType == AgentSpawnType.Random)
+        {
+            // Random spawn
+            Vector3 size = activeSpawnArea.lossyScale;
+            Vector3 min = center - size / 2f;
+            Vector3 max = center + size / 2f;
+
+            int spawned = 0;
+            int attempts = 0;
+
+            while (spawned < uiNumberOfAgents && attempts < 10000)
+            {
+                float posX = Random.Range(min.x, max.x);
+                float posY = Random.Range(min.y, max.y);
+                Vector3 spawnPos = new Vector3(posX, posY, center.z);
+
+                bool valid = true;
+                if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+
+                if (valid)
+                {
+                    foreach (GameObject agent in activeAgents)
+                    {
+                        if (Vector3.Distance(agent.transform.position, spawnPos) < uiSafetyDist)
+                        {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (valid)
+                {
+                    GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                    activeAgents.Add(newAgent);
+                    spawned++;
+                }
+                attempts++;
             }
         }
         else

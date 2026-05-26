@@ -684,8 +684,8 @@ Transform:
   m_GameObject: {fileID: 504839796}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -8.8778, y: 0.14, z: -1.79}
-  m_LocalScale: {x: 3.030546, y: 9.858521, z: 1}
+  m_LocalPosition: {x: -8.9698, y: 0.14, z: -1.79}
+  m_LocalScale: {x: 2.845445, y: 9.858521, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -2531,10 +2531,10 @@ MonoBehaviour:
   spawnAreas:
   - {fileID: 1159210625}
   obstacles:
-  - {fileID: 1352363347}
   - {fileID: 1812129414}
-  - {fileID: 2088448015}
   - {fileID: 1089375806}
+  - {fileID: 1352363347}
+  - {fileID: 2088448015}
   obstacleSpawnLocations:
   - {fileID: 1951503377}
   - {fileID: 1137989120}

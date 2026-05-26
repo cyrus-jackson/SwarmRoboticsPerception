@@ -70,14 +70,14 @@ public class SimRecorder : MonoBehaviour
     public string saveFolder = "SimulationRecordings";
 
     [Header("Parameter 1 Modification")]
-    public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.Alignment;
-    public float param1Start = 0.0f;
-    public float param1Step = 2.0f;
+    public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.MaxSpeed;
+    public float param1Start = 1.0f;
+    public float param1Step = 0.4f;
     public int param1Iterations = 4;
 
     [Header("Parameter 2 Modification")]
     public SwarmParameterToRecord parameterToRecord2 = SwarmParameterToRecord.RandomMovement;
-    public float param2Start = 0.0f;
+    public float param2Start = 1.0f;
     public float param2Step = 2.0f;
     public int param2Iterations = 4;
 
