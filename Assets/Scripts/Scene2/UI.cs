@@ -14,7 +14,8 @@ public enum AgentSpawnType
 {
     Grid,
     Random,
-    Spiral
+    Spiral,
+    Chain
 }
 
 public class UI : MonoBehaviour
@@ -55,6 +56,8 @@ public class UI : MonoBehaviour
 
     public bool showUI = true;
     private bool isRunning = false;
+    List<GameObject> agentsInRange = new List<GameObject>();
+
     private int uiNumberOfAgents = 42;
     private List<GameObject> activeAgents = new List<GameObject>();
 
@@ -563,6 +566,92 @@ public class UI : MonoBehaviour
                     spawned++;
                 }
                 attempts++;
+            }
+        }
+        else if (selectedSpawnType == AgentSpawnType.Chain)
+        {
+            // Chain spawn
+            Vector3 size = activeSpawnArea.lossyScale;
+            Vector3 min = center - size / 2f;
+            Vector3 max = center + size / 2f;
+            int spawned = 0;
+            int attempts = 0;
+            int chainRestarts = 0;
+
+            while (spawned < uiNumberOfAgents && chainRestarts < 100)
+            {
+                Vector3 spawnPos = Vector3.zero;
+                bool valid = true;
+                bool insertAtStart = false;
+
+                if (spawned == 0)
+                {
+                    spawnPos = new Vector3(Random.Range(min.x, max.x), Random.Range(min.y, max.y), center.z);
+                    if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+                }
+                else
+                {
+                    insertAtStart = (attempts >= 50); // After some failures on one end, start growing out from the FIRST agent
+                    int targetIndex = insertAtStart ? 0 : activeAgents.Count - 1;
+                    GameObject targetAgent = activeAgents[targetIndex];
+
+                    float angle = Random.Range(0f, Mathf.PI * 2f);
+                    float dist = Random.Range(uiSafetyDist, uiPerceptionRad);
+                    spawnPos = targetAgent.transform.position + new Vector3(Mathf.Cos(angle) * dist, Mathf.Sin(angle) * dist, 0);
+
+                    if (spawnPos.x < min.x || spawnPos.x > max.x || spawnPos.y < min.y || spawnPos.y > max.y)
+                    {
+                        valid = false;
+                    }
+                    else if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad))
+                    {
+                        valid = false;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < activeAgents.Count; i++)
+                        {
+                            float d = Vector3.Distance(activeAgents[i].transform.position, spawnPos);
+                            if (i == targetIndex)
+                            {
+                                if (d < uiSafetyDist) { valid = false; break; }
+                            }
+                            else
+                            {
+                                if (d <= uiPerceptionRad) { valid = false; break; }
+                            }
+                        }
+                    }
+                }
+
+                if (valid)
+                {
+                    GameObject newAgent = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                    if (insertAtStart && spawned > 0)
+                    {
+                        activeAgents.Insert(0, newAgent); // Prepend it so it remains a single chain
+                    }
+                    else
+                    {
+                        activeAgents.Add(newAgent);
+                    }
+
+                    spawned++;
+                    attempts = 0; // Reset attempts for the next agent
+                }
+                else
+                {
+                    attempts++;
+                    // If we get totally stuck on both ends for a while, scrap the chain and start over
+                    if (attempts > 150)
+                    {
+                        foreach (var a in activeAgents) Destroy(a);
+                        activeAgents.Clear();
+                        spawned = 0;
+                        attempts = 0;
+                        chainRestarts++;
+                    }
+                }
             }
         }
         else
