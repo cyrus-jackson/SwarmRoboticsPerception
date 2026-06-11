@@ -440,9 +440,9 @@ GameObject:
   m_Component:
   - component: {fileID: 366980690}
   - component: {fileID: 366980689}
-  - component: {fileID: 366980691}
   - component: {fileID: 366980692}
   - component: {fileID: 366980693}
+  - component: {fileID: 366980694}
   m_Layer: 0
   m_Name: Agent
   m_TagString: Untagged
@@ -524,18 +524,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &366980691
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 366980688}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4d52aef12a59d4000a39a042ed00e5cc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SwarmAgent
 --- !u!50 &366980692
 Rigidbody2D:
   serializedVersion: 5
@@ -599,6 +587,19 @@ CircleCollider2D:
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
   m_Radius: 0.52
+--- !u!114 &366980694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 366980688}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80a5d5a1f7a374d45a71d81417d60221, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TorusSwarmAgent
+  heading: 0
 --- !u!1 &504839796
 GameObject:
   m_ObjectHideFlags: 0
@@ -684,8 +685,8 @@ Transform:
   m_GameObject: {fileID: 504839796}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -8.0988, y: 0.14, z: -1.79}
-  m_LocalScale: {x: 3.2495666, y: 9.858521, z: 1}
+  m_LocalPosition: {x: -7.9355, y: 0.14, z: -1.79}
+  m_LocalScale: {x: 3.575319, y: 9.858521, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1321,7 +1322,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 912726474}
-  - component: {fileID: 912726473}
+  - component: {fileID: 912726475}
   m_Layer: 0
   m_Name: SwarmManager
   m_TagString: Untagged
@@ -1329,35 +1330,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &912726473
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 912726472}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d80b128d9617e4dbd945a375cd8fc0af, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SwarmManager
-  agents:
-  - {fileID: 366980688}
-  commonFateTarget: {fileID: 236683210}
-  commonFateCollider: {fileID: 236683211}
-  centralObstacle: {fileID: 1089375806}
-  cohesionIntensity: 2
-  separationIntensity: 1
-  alignmentIntensity: 4
-  frictionIntensity: 0.1
-  randomMovementIntensity: 0
-  overlappingAvoidanceIntensity: 20
-  safetyDistance: 1
-  envObstacleAvoidanceIntensity: 40
-  perceptionRadius: 1
-  obstacleAvoidanceRadius: 0.85
-  maxSpeed: 1.5
-  showPerceptionRadius: 1
 --- !u!4 &912726474
 Transform:
   m_ObjectHideFlags: 0
@@ -1373,6 +1345,26 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &912726475
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 912726472}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 396c6fc86554346f89e8692e9600c53e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TorusSwarmManager
+  agents: []
+  agentSpeed: 5
+  angularGain: 0.5
+  repulsionRadius: 1
+  orientationRadius: 8
+  initMode: 0
+  showRepulsionRadius: 0
+  showOrientationRadius: 0
 --- !u!1 &997560495
 GameObject:
   m_ObjectHideFlags: 0
@@ -1667,7 +1659,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!212 &1089375805
 SpriteRenderer:
   serializedVersion: 2
@@ -2329,7 +2321,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!60 &1352363344
 PolygonCollider2D:
   m_ObjectHideFlags: 0
@@ -2523,29 +2515,12 @@ MonoBehaviour:
   m_GameObject: {fileID: 1427614507}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 841814d4c51da49039869fcb7df60c44, type: 3}
+  m_Script: {fileID: 11500000, guid: fe67dc6f3b46b4416a09dbbf64f6d584, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::UI
+  m_EditorClassIdentifier: Assembly-CSharp::TorusUI
   agentPrefab: {fileID: 366980688}
-  swarmManager: {fileID: 912726473}
-  spawnAreas:
-  - {fileID: 1159210625}
-  obstacles:
-  - {fileID: 1812129414}
-  - {fileID: 1089375806}
-  - {fileID: 1352363347}
-  - {fileID: 2088448015}
-  obstacleSpawnLocations:
-  - {fileID: 1951503377}
-  - {fileID: 1137989120}
-  - {fileID: 1891935190}
-  - {fileID: 1751922602}
-  commonFates: []
-  circleSpawnArea: {fileID: 564621125}
-  densificationSpawnArea: {fileID: 911438471}
-  densificationCommonFate: {fileID: 637293462}
-  flockingSpawnArea: {fileID: 504839798}
-  flockingCommonFate: {fileID: 236683210}
+  swarmManager: {fileID: 912726475}
+  spawnArea: {fileID: 504839798}
   showUI: 1
 --- !u!1 &1658453497
 GameObject:
@@ -2734,7 +2709,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!50 &1812129411
 Rigidbody2D:
   serializedVersion: 5
@@ -2829,13 +2804,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1812129410}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.0056439894, y: -0.0026395854, z: -0.20729189, w: 0.9782593}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -0.14, y: -0.01, z: 0}
   m_LocalScale: {x: 0.5, y: 5, z: 1.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0.57, y: -0.43, z: -23.93}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!61 &1812129415
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -3131,7 +3106,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!50 &2088448012
 Rigidbody2D:
   serializedVersion: 5
