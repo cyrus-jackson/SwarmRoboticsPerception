@@ -86,7 +86,7 @@ public class SwarmAgent : MonoBehaviour
             // If the target has a collider, attract to the closest point on the collider
             if (manager.commonFateCollider != null)
             {
-                Debug.LogWarning("Attracting to common fate collider: " + manager.commonFateCollider.name);
+                // Debug.LogWarning("Attracting to common fate collider: " + manager.commonFateCollider.name);
                 targetPoint = manager.commonFateCollider.ClosestPoint(currentPosition);
             }
 
@@ -168,6 +168,22 @@ public class SwarmAgent : MonoBehaviour
         {
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, cachedPerceptionRadius);
+        }
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.gameObject.name.ToLower().Contains("wall") || collision.gameObject.CompareTag("Wall"))
+        {
+            Debug.Log($"{gameObject.name} hit the wall: {collision.gameObject.name}");
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collider)
+    {
+        if (collider.gameObject.name.ToLower().Contains("wall") || collider.gameObject.CompareTag("Wall"))
+        {
+            Debug.Log($"{gameObject.name} hit the wall: {collider.gameObject.name}");
         }
     }
 }

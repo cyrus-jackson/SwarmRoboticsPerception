@@ -963,7 +963,7 @@ public class UI : MonoBehaviour
 
         // Always move the obstacle root.
         obstacle.position = spawn.position;
-        obstacle.rotation = spawn.rotation;
+        // obstacle.rotation = spawn.rotation;
 
         // If any rigidbodies exist on the obstacle hierarchy (common if collider is on a child),
         // sync them too so physics/colliders match the transform you see.
