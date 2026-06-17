@@ -35,6 +35,7 @@ public class SimRecorder : MonoBehaviour
         public float parameter1Value;
         public string parameter2;
         public float parameter2Value;
+        public string swarmType;
         public string obstacleName;
         public string obstacleSpawnLocationName;
         public float perceptionRadius;
@@ -81,6 +82,19 @@ public class SimRecorder : MonoBehaviour
     public float param2Step = 2.0f;
     public int param2Iterations = 4;
 
+    [Header("SwarmType + Parameter Batch")]
+    public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Random, SwarmType.Dispersion };
+    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.RandomMovement;
+    public float swarmTypeParamStart = 0.0f;
+    public float swarmTypeParamStep = 4f;
+    public int swarmTypeParamIterations = 4;
+
+    [Header("Single Parameter Batch")]
+    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.RandomMovement;
+    public float singleParamStart = 0.0f;
+    public float singleParamStep = 4.0f;
+    public int singleParamIterations = 16;
+
     [Header("Obstacle Batch (Obstacle List + 1 Parameter)")]
     public SwarmParameterToRecord obstacleBatchParameter = SwarmParameterToRecord.PerceptionRad;
     public float obstacleParamStart = 1.3f;
@@ -94,15 +108,18 @@ public class SimRecorder : MonoBehaviour
     private string currentSpawnLocationDisplayName = "";
     private bool isObstacleBatchMode = false;
     private bool isObstacleSpawnBatchMode = false;
+    private bool isSingleParameterBatchMode = false;
+    private bool isSwarmTypeBatchMode = false;
+    private SwarmType currentSwarmTypeDisplay;
 
     void OnGUI()
     {
         if (isRecording)
         {
             GUIStyle style = new GUIStyle();
-            style.fontSize = 32;
+            style.fontSize = 36;
             style.fontStyle = FontStyle.Bold;
-            style.normal.textColor = Color.white;
+            style.normal.textColor = Color.black;
 
             string displayText;
             if (isObstacleSpawnBatchMode)
@@ -113,15 +130,31 @@ public class SimRecorder : MonoBehaviour
             {
                 displayText = $"Obstacle: {currentObstacleDisplayName} | {obstacleBatchParameter}: {currentParam1DisplayValue:F2}";
             }
+            else if (isSingleParameterBatchMode)
+            {
+                displayText = $"{singleBatchParameter}: {currentParam1DisplayValue:F2}";
+            }
+            else if (isSwarmTypeBatchMode)
+            {
+                displayText = $"Type: {currentSwarmTypeDisplay} | {swarmTypeBatchParameter}: {currentParam1DisplayValue:F2}";
+            }
             else
             {
                 displayText = $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
             }
 
-            GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.black } });
+            GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
             GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
         }
     }
+    public void StartSingleParameterBatchRecording()
+    {
+        if (!isRecording)
+        {
+            StartCoroutine(SingleParameterBatchRecordCoroutine());
+        }
+    }
+
     public void StartBatchRecording()
     {
         if (!isRecording)
@@ -146,11 +179,163 @@ public class SimRecorder : MonoBehaviour
         }
     }
 
+    public void StartSwarmTypeParameterBatchRecording()
+    {
+        if (!isRecording)
+        {
+            StartCoroutine(SwarmTypeParameterBatchRecordCoroutine());
+        }
+    }
+
+    private IEnumerator SingleParameterBatchRecordCoroutine()
+    {
+        isRecording = true;
+        isObstacleBatchMode = false;
+        isObstacleSpawnBatchMode = false;
+        isSingleParameterBatchMode = true;
+        isSwarmTypeBatchMode = false;
+
+        string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
+        string paramFolderName = $"{singleBatchParameter}";
+        string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+        string targetFolderPath = Path.Combine(baseFolderPath, paramFolderName, timestampFolder);
+
+        if (!Directory.Exists(targetFolderPath))
+        {
+            Directory.CreateDirectory(targetFolderPath);
+        }
+
+        // Hide UI
+        if (uiController != null)
+        {
+            uiController.showUI = false;
+        }
+
+        List<SimulationConfig> simulations = new List<SimulationConfig>();
+
+        for (int i = 0; i < singleParamIterations; i++)
+        {
+            float currentParam = singleParamStart + (i * singleParamStep);
+            currentParam1DisplayValue = currentParam;
+
+            // Set parameter via code
+            if (uiController != null)
+            {
+                uiController.SetParameter(singleBatchParameter, currentParam);
+            }
+
+            uiController.ResetScene();
+
+            // Start simulation
+            uiController.SetMotion(true);
+
+            string fileName = $"{singleBatchParameter.ToString().ToLower()}_{currentParam:F2}";
+
+            SimulationConfig config = new SimulationConfig
+            {
+                fileName = fileName,
+                variedParameter = paramFolderName,
+                variedParameterValue = currentParam,
+                parameter1 = singleBatchParameter.ToString(),
+                parameter1Value = currentParam,
+                parameter2 = null,
+                parameter2Value = 0f,
+                obstacleName = swarmManager.centralObstacle != null ? swarmManager.centralObstacle.name : null,
+                perceptionRadius = swarmManager.perceptionRadius,
+                cohesion = swarmManager.cohesionIntensity,
+                separation = swarmManager.separationIntensity,
+                alignment = swarmManager.alignmentIntensity,
+                friction = swarmManager.frictionIntensity,
+                randomMovement = swarmManager.randomMovementIntensity,
+                overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                safetyDistance = swarmManager.safetyDistance,
+                envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                maxSpeed = swarmManager.maxSpeed,
+                numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
+            };
+
+            simulations.Add(config);
+
+#if UNITY_EDITOR
+            var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+            var recorderController = new RecorderController(controllerSettings);
+
+            var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+            videoRecorder.name = "My Video Recorder";
+            videoRecorder.Enabled = true;
+            videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+            videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
+
+            videoRecorder.ImageInputSettings = new GameViewInputSettings
+            {
+                OutputWidth = 1920,
+                OutputHeight = 1080
+            };
+            
+            videoRecorder.AudioInputSettings.PreserveAudio = false;
+
+            controllerSettings.AddRecorderSettings(videoRecorder);
+            controllerSettings.SetRecordModeToManual();
+            controllerSettings.FrameRate = 30;
+
+            recorderController.PrepareRecording();
+            recorderController.StartRecording();
+#else
+            Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
+#endif
+
+            float timer = 0f;
+
+            while (timer < recordingTimePerSim)
+            {
+                yield return new WaitForEndOfFrame();
+                timer += Time.deltaTime;
+            }
+
+#if UNITY_EDITOR
+            recorderController.StopRecording();
+#endif
+
+            uiController.SetMotion(false);
+            Debug.Log($"[SimRecorder] Saved video sequence to {targetFolderPath}/{fileName}.mp4");
+        }
+
+        // Write a single config for the whole folder.
+        {
+            BatchConfig batchConfig = new BatchConfig
+            {
+                batchType = "single-parameter",
+                folderName = paramFolderName,
+                timestamp = timestampFolder,
+                recordingTimePerSim = recordingTimePerSim,
+                saveFolder = saveFolder,
+                simulations = simulations.ToArray()
+            };
+
+            string configJson = JsonUtility.ToJson(batchConfig, true);
+            File.WriteAllText(Path.Combine(targetFolderPath, "batch_config.json"), configJson);
+        }
+
+        // Restore UI
+        if (uiController != null)
+        {
+            uiController.showUI = true;
+        }
+
+        isRecording = false;
+        isSingleParameterBatchMode = false;
+        Debug.Log("[SimRecorder] Single parameter batch recording finished.");
+    }
+
     private IEnumerator BatchRecordCoroutine()
     {
         isRecording = true;
         isObstacleBatchMode = false;
         isObstacleSpawnBatchMode = false;
+        isSingleParameterBatchMode = false;
+        isSwarmTypeBatchMode = false;
 
         string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
         string paramFolderName = $"{parameterToRecord1}_vs_{parameterToRecord2}";
@@ -297,6 +482,8 @@ public class SimRecorder : MonoBehaviour
         isRecording = true;
         isObstacleBatchMode = true;
         isObstacleSpawnBatchMode = false;
+        isSingleParameterBatchMode = false;
+        isSwarmTypeBatchMode = false;
 
         if (uiController == null || swarmManager == null)
         {
@@ -455,6 +642,8 @@ public class SimRecorder : MonoBehaviour
         isRecording = true;
         isObstacleBatchMode = false;
         isObstacleSpawnBatchMode = true;
+        isSingleParameterBatchMode = false;
+        isSwarmTypeBatchMode = false;
 
         if (uiController == null || swarmManager == null)
         {
@@ -622,6 +811,152 @@ public class SimRecorder : MonoBehaviour
         isRecording = false;
         isObstacleSpawnBatchMode = false;
         Debug.Log("[SimRecorder] Obstacle/spawn-location batch recording finished.");
+    }
+
+    private IEnumerator SwarmTypeParameterBatchRecordCoroutine()
+    {
+        isRecording = true;
+        isObstacleBatchMode = false;
+        isObstacleSpawnBatchMode = false;
+        isSingleParameterBatchMode = false;
+        isSwarmTypeBatchMode = true;
+
+        if (uiController == null || swarmManager == null)
+        {
+            Debug.LogError("[SimRecorder] Missing uiController or swarmManager; cannot start swarm type batch recording.");
+            isRecording = false;
+            isSwarmTypeBatchMode = false;
+            yield break;
+        }
+
+        string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
+        string paramFolderName = $"SwarmType_vs_{swarmTypeBatchParameter}";
+        string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string targetFolderPath = Path.Combine(baseFolderPath, paramFolderName, timestampFolder);
+
+        if (!Directory.Exists(targetFolderPath))
+        {
+            Directory.CreateDirectory(targetFolderPath);
+        }
+
+        // Hide UI
+        uiController.showUI = false;
+
+        List<SimulationConfig> simulations = new List<SimulationConfig>();
+
+        for (int typeIndex = 0; typeIndex < swarmTypesToRecord.Count; typeIndex++)
+        {
+            SwarmType sType = swarmTypesToRecord[typeIndex];
+            currentSwarmTypeDisplay = sType;
+
+            for (int i = 0; i < swarmTypeParamIterations; i++)
+            {
+                float currentParam = swarmTypeParamStart + (i * swarmTypeParamStep);
+                currentParam1DisplayValue = currentParam;
+
+                uiController.SetSwarmType(sType);
+                uiController.SetParameter(swarmTypeBatchParameter, currentParam);
+
+                uiController.ResetScene();
+                uiController.SetMotion(true);
+
+                string typeSafe = SanitizeFileName(sType.ToString());
+                string fileName = $"type_{typeSafe}_{swarmTypeBatchParameter.ToString().ToLower()}_{currentParam:F2}";
+                fileName = SanitizeFileName(fileName);
+
+                SimulationConfig config = new SimulationConfig
+                {
+                    fileName = fileName,
+                    variedParameter = $"{paramFolderName}",
+                    variedParameterValue = currentParam,
+                    parameter1 = "SwarmType",
+                    parameter1Value = typeIndex,
+                    parameter2 = swarmTypeBatchParameter.ToString(),
+                    parameter2Value = currentParam,
+                    swarmType = sType.ToString(),
+                    obstacleName = swarmManager.centralObstacle != null ? swarmManager.centralObstacle.name : null,
+                    perceptionRadius = swarmManager.perceptionRadius,
+                    cohesion = swarmManager.cohesionIntensity,
+                    separation = swarmManager.separationIntensity,
+                    alignment = swarmManager.alignmentIntensity,
+                    friction = swarmManager.frictionIntensity,
+                    randomMovement = swarmManager.randomMovementIntensity,
+                    overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                    safetyDistance = swarmManager.safetyDistance,
+                    envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                    obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                    maxSpeed = swarmManager.maxSpeed,
+                    numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
+                };
+
+                simulations.Add(config);
+
+#if UNITY_EDITOR
+                var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+                var recorderController = new RecorderController(controllerSettings);
+
+                var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+                videoRecorder.name = "My Video Recorder";
+                videoRecorder.Enabled = true;
+                videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+                videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
+
+                videoRecorder.ImageInputSettings = new GameViewInputSettings
+                {
+                    OutputWidth = 1920,
+                    OutputHeight = 1080
+                };
+
+                videoRecorder.AudioInputSettings.PreserveAudio = false;
+
+                controllerSettings.AddRecorderSettings(videoRecorder);
+                controllerSettings.SetRecordModeToManual();
+                controllerSettings.FrameRate = 30;
+
+                recorderController.PrepareRecording();
+                recorderController.StartRecording();
+#else
+                Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
+#endif
+
+                float timer = 0f;
+                while (timer < recordingTimePerSim)
+                {
+                    yield return new WaitForEndOfFrame();
+                    timer += Time.deltaTime;
+                }
+
+#if UNITY_EDITOR
+                recorderController.StopRecording();
+#endif
+
+                uiController.SetMotion(false);
+                Debug.Log($"[SimRecorder] Saved swarm type batch video to {targetFolderPath}/{fileName}.mp4");
+            }
+        }
+
+        // Write a single config for the whole folder.
+        {
+            BatchConfig batchConfig = new BatchConfig
+            {
+                batchType = "swarmtype+one-parameter",
+                folderName = paramFolderName,
+                timestamp = timestampFolder,
+                recordingTimePerSim = recordingTimePerSim,
+                saveFolder = saveFolder,
+                simulations = simulations.ToArray()
+            };
+
+            string configJson = JsonUtility.ToJson(batchConfig, true);
+            File.WriteAllText(Path.Combine(targetFolderPath, "batch_config.json"), configJson);
+        }
+
+        uiController.showUI = true;
+        uiController.SetMotion(false);
+
+        isRecording = false;
+        isSwarmTypeBatchMode = false;
+        Debug.Log("[SimRecorder] Swarm type batch recording finished.");
     }
 
     private static string SanitizeFileName(string name)

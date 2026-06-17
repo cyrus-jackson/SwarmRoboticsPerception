@@ -83,6 +83,7 @@ public class UI : MonoBehaviour
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = true;
     private Vector2 scrollPosition;
+    private Texture2D bgTexture;
 
     void Start()
     {
@@ -154,7 +155,23 @@ public class UI : MonoBehaviour
     {
         if (!showUI) return;
 
-        GUILayout.BeginArea(new Rect(20, 20, 550, Screen.height - 40), GUI.skin.box);
+        if (bgTexture == null)
+        {
+            bgTexture = new Texture2D(1, 1);
+            bgTexture.SetPixel(0, 0, new Color(0.9f, 0.9f, 0.9f, 0.4f)); // Light grey, transparent
+            bgTexture.Apply();
+        }
+
+        GUIStyle bgStyle = new GUIStyle(GUI.skin.box);
+        bgStyle.normal.background = bgTexture;
+
+        // Ensure text is black via the skin rather than contentColor to prevent weird tinting
+        GUI.contentColor = Color.white;
+        GUI.skin.label.normal.textColor = Color.black;
+        GUI.skin.toggle.normal.textColor = Color.black;
+        GUI.skin.button.normal.textColor = Color.black;
+
+        GUILayout.BeginArea(new Rect(20, 20, 550, Screen.height - 40), bgStyle);
         scrollPosition = GUILayout.BeginScrollView(scrollPosition);
 
         GUILayout.Label("Swarm Control UI (Press 'X' to hide)", GUI.skin.label);
@@ -244,6 +261,32 @@ public class UI : MonoBehaviour
             }
         }
 
+        if (GUILayout.Button("Batch Record Single Parameter"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartSingleParameterBatchRecording();
+            }
+        }
+
+        if (GUILayout.Button("Batch Record SwarmType x Parameter"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartSwarmTypeParameterBatchRecording();
+            }
+        }
+
         if (GUILayout.Button("Batch Record Obstacles (0th used)"))
         {
             SimRecorder recorder = GetComponent<SimRecorder>();
@@ -293,6 +336,12 @@ public class UI : MonoBehaviour
             UpdateSwarmManager();
             swarmManager.enabled = isRunning;
         }
+    }
+
+    public void SetSwarmType(SwarmType type)
+    {
+        selectedSwarmType = type;
+        ApplyPreset(selectedSwarmType);
     }
 
     public void SetParameter(SwarmParameterToRecord param, float value)
