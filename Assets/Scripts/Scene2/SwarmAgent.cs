@@ -5,16 +5,8 @@ public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
 
-    // Cached values for visualization
-    private float cachedPerceptionRadius;
-    private bool cachedShowPerceptionRadius;
-
     public void UpdateAgent(SwarmManager manager)
     {
-        // Cache variables for gizmos
-        cachedPerceptionRadius = manager.perceptionRadius;
-        cachedShowPerceptionRadius = manager.showPerceptionRadius;
-
         Vector2 currentPosition = transform.position;
 
         Vector2 cohesionSum = Vector2.zero;
@@ -28,9 +20,17 @@ public class SwarmAgent : MonoBehaviour
             if (otherObj != gameObject && otherObj != null)
             {
                 Vector2 otherPos = otherObj.transform.position;
-                float distance = Vector2.Distance(currentPosition, otherPos);
+                float centerDistance = Vector2.Distance(currentPosition, otherPos);
 
-                if (distance < manager.perceptionRadius)
+                // Calculate distance to the edge of the other agent (using its collider if available)
+                float perceptionDistance = centerDistance;
+                Collider2D otherCollider = otherObj.GetComponent<Collider2D>();
+                if (otherCollider != null)
+                {
+                    perceptionDistance = Vector2.Distance(currentPosition, otherCollider.ClosestPoint(currentPosition));
+                }
+
+                if (perceptionDistance < manager.perceptionRadius)
                 {
                     cohesionSum += otherPos;
                     separationSum += (currentPosition - otherPos).normalized;
@@ -44,7 +44,7 @@ public class SwarmAgent : MonoBehaviour
                 }
 
                 // Rule 6: Overlapping Avoidance
-                if (distance < manager.safetyDistance && distance > 0.0001f)
+                if (centerDistance < manager.safetyDistance && centerDistance > 0.0001f)
                 {
                     Vector2 avoidDirection = currentPosition - otherPos;
                     overlappingAvoidanceSum += avoidDirection.normalized;
@@ -159,15 +159,6 @@ public class SwarmAgent : MonoBehaviour
         {
             float angle = Mathf.Atan2(currentVelocity.y, currentVelocity.x) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
-        }
-    }
-
-    private void OnDrawGizmos()
-    {
-        if (cachedShowPerceptionRadius)
-        {
-            Gizmos.color = Color.red;
-            Gizmos.DrawWireSphere(transform.position, cachedPerceptionRadius);
         }
     }
 

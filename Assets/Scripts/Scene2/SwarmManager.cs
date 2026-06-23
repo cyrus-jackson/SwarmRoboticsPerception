@@ -52,4 +52,19 @@ public class SwarmManager : MonoBehaviour
             }
         }
     }
+
+    private void OnDrawGizmos()
+    {
+        if (showPerceptionRadius && agents != null)
+        {
+            Gizmos.color = Color.red;
+            foreach (GameObject agentObj in agents)
+            {
+                if (agentObj != null)
+                {
+                    Gizmos.DrawWireSphere(agentObj.transform.position, perceptionRadius);
+                }
+            }
+        }
+    }
 }

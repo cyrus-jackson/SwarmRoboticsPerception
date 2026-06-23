@@ -224,7 +224,7 @@ public class UI : MonoBehaviour
         uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 500);
 
         GUILayout.Label("<b>Perception</b>");
-        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0, 10);
+        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0, 40);
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 

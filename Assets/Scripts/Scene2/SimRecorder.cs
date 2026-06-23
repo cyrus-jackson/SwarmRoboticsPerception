@@ -71,28 +71,28 @@ public class SimRecorder : MonoBehaviour
     public string saveFolder = "SimulationRecordings";
 
     [Header("Parameter 1 Modification")]
-    public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.MaxSpeed;
-    public float param1Start = 1.0f;
-    public float param1Step = 0.4f;
+    public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.PerceptionRad;
+    public float param1Start = 0.1f;
+    public float param1Step = 5.0f;
     public int param1Iterations = 4;
 
     [Header("Parameter 2 Modification")]
     public SwarmParameterToRecord parameterToRecord2 = SwarmParameterToRecord.RandomMovement;
-    public float param2Start = 1.0f;
-    public float param2Step = 2.0f;
+    public float param2Start = 0.0f;
+    public float param2Step = 4.0f;
     public int param2Iterations = 4;
 
     [Header("SwarmType + Parameter Batch")]
     public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Random, SwarmType.Dispersion };
-    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.RandomMovement;
+    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.MaxSpeed;
     public float swarmTypeParamStart = 0.0f;
-    public float swarmTypeParamStep = 4f;
+    public float swarmTypeParamStep = 0.6f;
     public int swarmTypeParamIterations = 4;
 
     [Header("Single Parameter Batch")]
-    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.RandomMovement;
+    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.MaxSpeed;
     public float singleParamStart = 0.0f;
-    public float singleParamStep = 4.0f;
+    public float singleParamStep = 0.4f;
     public int singleParamIterations = 16;
 
     [Header("Obstacle Batch (Obstacle List + 1 Parameter)")]
@@ -216,6 +216,9 @@ public class SimRecorder : MonoBehaviour
 
         for (int i = 0; i < singleParamIterations; i++)
         {
+            // float currentParam = singleParamStart + Mathf.Pow(singleParamStep, i);
+            // if (currentParam == 1f)
+            //     currentParam = 0;
             float currentParam = singleParamStart + (i * singleParamStep);
             currentParam1DisplayValue = currentParam;
 
@@ -363,7 +366,13 @@ public class SimRecorder : MonoBehaviour
 
             for (int j = 0; j < param2Iterations; j++)
             {
-                float currentParam2 = param2Start + (j * param2Step);
+                //float currentParam2 = param2Start + (j * param2Step);
+                // float currentParam = swarmTypeParamStart + Mathf.Pow(swarmTypeParamStep, i);
+                // if (currentParam == 1f)
+                //     currentParam = 0;
+                float currentParam2 = param2Start + Mathf.Pow(param2Step, j);
+                if (currentParam2 == 1f)
+                    currentParam2 = 0;
                 currentParam2DisplayValue = currentParam2;
 
                 // Set parameter via code
@@ -851,7 +860,12 @@ public class SimRecorder : MonoBehaviour
 
             for (int i = 0; i < swarmTypeParamIterations; i++)
             {
+
                 float currentParam = swarmTypeParamStart + (i * swarmTypeParamStep);
+
+                // float currentParam = swarmTypeParamStart + Mathf.Pow(swarmTypeParamStep, i);
+                // if (currentParam == 1f)
+                //     currentParam = 0;
                 currentParam1DisplayValue = currentParam;
 
                 uiController.SetSwarmType(sType);

@@ -53,7 +53,15 @@ public class VideoGridManager : MonoBehaviour
             return;
         }
 
-        string[] videoFiles = Directory.GetFiles(path, "*.mp4").OrderBy(f => f).ToArray();
+        string[] videoFiles = Directory.GetFiles(path, "*.mp4")
+            .OrderBy(f => System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(f), @"\d+(\.\d+)?", m =>
+            {
+                string[] p = m.Value.Split('.');
+                string intPart = p[0].PadLeft(10, '0');
+                string decPart = p.Length > 1 ? p[1].PadRight(10, '0') : "0000000000";
+                return intPart + "." + decPart;
+            }))
+            .ToArray();
         if (videoFiles.Length == 0)
         {
             Debug.LogWarning($"[VideoGridManager] No MP4 files found in directory: {path}");
