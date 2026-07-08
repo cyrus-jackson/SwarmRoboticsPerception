@@ -40,15 +40,31 @@ public class SwarmManager : MonoBehaviour
 
     void Update()
     {
+        if (agents == null) return;
+
         foreach (GameObject agentObj in agents)
         {
-            if (agentObj != null)
+            if (agentObj == null) continue;
+
+            SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
+            if (agent != null)
             {
-                SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
-                if (agent != null)
-                {
-                    agent.UpdateAgent(this);
-                }
+                agent.UpdateAgent(this);
+            }
+
+            // Runtime visualization: ensure each agent has a PerceptionVisualizer
+            PerceptionVisualizer pv = agentObj.GetComponent<PerceptionVisualizer>();
+            if (pv == null && showPerceptionRadius)
+            {
+                pv = agentObj.AddComponent<PerceptionVisualizer>();
+                pv.segments = 48;
+                pv.lineWidth = 0.02f;
+            }
+
+            if (pv != null)
+            {
+                pv.radius = perceptionRadius;
+                pv.enabled = showPerceptionRadius;
             }
         }
     }

@@ -216,7 +216,7 @@ public class UI : MonoBehaviour
         uiSeparation = DrawSlider("Separation", uiSeparation, 0, 10);
         uiAlignment = DrawSlider("Alignment", uiAlignment, 0, 10);
         uiFriction = DrawSlider("Friction", uiFriction, 0, 1);
-        uiRandomMvmt = DrawSlider("Random Mvmt", uiRandomMvmt, 0, 20);
+        uiRandomMvmt = DrawSlider("Random Mvmt", uiRandomMvmt, 0, 100);
 
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
@@ -224,7 +224,7 @@ public class UI : MonoBehaviour
         uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 500);
 
         GUILayout.Label("<b>Perception</b>");
-        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0, 40);
+        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 10, 30);
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
@@ -258,6 +258,19 @@ public class UI : MonoBehaviour
                 recorder.uiController = this;
                 if (swarmManager != null) recorder.swarmManager = swarmManager;
                 recorder.StartBatchRecording();
+            }
+        }
+
+        if (GUILayout.Button("Record Current Settings"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartCurrentSettingsRecording();
             }
         }
 
@@ -360,6 +373,11 @@ public class UI : MonoBehaviour
             case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
             case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
         }
+    }
+
+    public void ApplySettingsToActiveSwarm()
+    {
+        UpdateSwarmManager();
     }
 
     void ToggleMotion()
