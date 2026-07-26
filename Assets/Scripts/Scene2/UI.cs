@@ -274,6 +274,19 @@ public class UI : MonoBehaviour
             }
         }
 
+        if (GUILayout.Button("Record Combinations"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartCombinationsRecording();
+            }
+        }
+
         if (GUILayout.Button("Batch Record Single Parameter"))
         {
             SimRecorder recorder = GetComponent<SimRecorder>();
@@ -373,11 +386,6 @@ public class UI : MonoBehaviour
             case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
             case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
         }
-    }
-
-    public void ApplySettingsToActiveSwarm()
-    {
-        UpdateSwarmManager();
     }
 
     void ToggleMotion()
