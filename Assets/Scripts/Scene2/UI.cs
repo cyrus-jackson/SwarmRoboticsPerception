@@ -54,6 +54,24 @@ public class UI : MonoBehaviour
     [Tooltip("The common fate specifically for Flocking type")]
     public Transform flockingCommonFate;
 
+    [Header("Wall Setup")]
+    [Tooltip("Walls in the scene. Recording rules can disable individual walls by name per motion type.")]
+    public List<Transform> walls = new List<Transform>();
+    [Tooltip("Optional parent (e.g. the 'Walls' object). Its children are added to the wall list on Start.")]
+    public Transform wallsRoot;
+
+    [Header("Goal Area Setup (per motion type)")]
+    [Tooltip("Target region for Flocking. Agents inside are counted; can end a recording early.")]
+    public Transform flockingGoalArea;
+    [Tooltip("Target region for Densification.")]
+    public Transform densificationGoalArea;
+    [Tooltip("Target region for Random.")]
+    public Transform randomGoalArea;
+    [Tooltip("Target region for Dispersion.")]
+    public Transform dispersionGoalArea;
+    [Tooltip("Hide the inactive goal areas so only the current type's area is visible in the recording.")]
+    public bool hideInactiveGoalAreas = true;
+
     public bool showUI = true;
     private bool isRunning = false;
     List<GameObject> agentsInRange = new List<GameObject>();
@@ -81,7 +99,7 @@ public class UI : MonoBehaviour
     private float uiPerceptionRad = 0.2f;
     private float uiObstacleRad = 0.1f;
     private float uiMaxSpeed = 1.5f;
-    private bool uiShowPerceptionRadius = true;
+    private bool uiShowPerceptionRadius = false;
     private Vector2 scrollPosition;
     private Texture2D bgTexture;
 
@@ -90,8 +108,78 @@ public class UI : MonoBehaviour
         if (swarmManager != null)
             swarmManager.enabled = false;
 
+        CollectWallsFromRoot();
         ApplyPreset(selectedSwarmType);
         ResetScene();
+    }
+
+    /// <summary>Adds the children of wallsRoot to the wall list, skipping duplicates.</summary>
+    private void CollectWallsFromRoot()
+    {
+        if (wallsRoot == null) return;
+
+        if (walls == null) walls = new List<Transform>();
+
+        foreach (Transform child in wallsRoot)
+        {
+            if (child != null && !walls.Contains(child))
+            {
+                walls.Add(child);
+            }
+        }
+    }
+
+    /// <summary>Re-enables every wall in the list.</summary>
+    public void EnableAllWalls()
+    {
+        if (walls == null) return;
+
+        foreach (Transform wall in walls)
+        {
+            if (wall != null) wall.gameObject.SetActive(true);
+        }
+    }
+
+    /// <summary>
+    /// Enables every wall, then disables the ones whose names match the supplied list
+    /// (case-insensitive, surrounding whitespace ignored). Returns the names actually disabled.
+    /// </summary>
+    public List<string> ApplyWallsDisabledByName(List<string> wallNamesToDisable)
+    {
+        EnableAllWalls();
+
+        List<string> disabledWalls = new List<string>();
+        if (wallNamesToDisable == null || wallNamesToDisable.Count == 0) return disabledWalls;
+
+        foreach (string rawName in wallNamesToDisable)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) continue;
+
+            string targetName = rawName.Trim();
+            bool matched = false;
+
+            if (walls != null)
+            {
+                foreach (Transform wall in walls)
+                {
+                    if (wall == null) continue;
+
+                    if (string.Equals(wall.name, targetName, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        wall.gameObject.SetActive(false);
+                        disabledWalls.Add(wall.name);
+                        matched = true;
+                    }
+                }
+            }
+
+            if (!matched)
+            {
+                Debug.LogWarning($"UI: No wall named '{targetName}' in the walls list — check the spelling or add it to the Wall Setup list.");
+            }
+        }
+
+        return disabledWalls;
     }
 
     void Update()
@@ -370,6 +458,9 @@ public class UI : MonoBehaviour
         ApplyPreset(selectedSwarmType);
     }
 
+    /// <summary>The motion type currently selected in the scene.</summary>
+    public SwarmType SelectedSwarmType => selectedSwarmType;
+
     public void SetParameter(SwarmParameterToRecord param, float value)
     {
         switch (param)
@@ -490,6 +581,71 @@ public class UI : MonoBehaviour
                 commonFates[i].gameObject.SetActive(shouldShow);
             }
         }
+
+        ApplyGoalAreaForType();
+    }
+
+    /// <summary>
+    /// Returns the goal area Transform configured for the given swarm type (may be null).
+    /// </summary>
+    public Transform GetGoalAreaTransformForType(SwarmType type)
+    {
+        switch (type)
+        {
+            case SwarmType.Flocking: return flockingGoalArea;
+            case SwarmType.Densification: return densificationGoalArea;
+            case SwarmType.Random: return randomGoalArea;
+            case SwarmType.Dispersion: return dispersionGoalArea;
+        }
+        return null;
+    }
+
+    /// <summary>The GoalArea component in use for the current swarm type (null if none configured).</summary>
+    public GoalArea ActiveGoalArea { get; private set; }
+
+    /// <summary>Name of the active goal area, or null when none is configured.</summary>
+    public string ActiveGoalAreaName => ActiveGoalArea != null ? ActiveGoalArea.name : null;
+
+    /// <summary>
+    /// Activates only the goal area belonging to the selected swarm type, ensures it carries a
+    /// GoalArea component, and hands it to the SwarmManager for per-frame counting.
+    /// </summary>
+    private void ApplyGoalAreaForType()
+    {
+        Transform activeGoalAreaTransform = GetGoalAreaTransformForType(selectedSwarmType);
+
+        if (hideInactiveGoalAreas)
+        {
+            Transform[] allGoalAreas = { flockingGoalArea, densificationGoalArea, randomGoalArea, dispersionGoalArea };
+            foreach (Transform area in allGoalAreas)
+            {
+                if (area == null) continue;
+                area.gameObject.SetActive(area == activeGoalAreaTransform);
+            }
+        }
+        else if (activeGoalAreaTransform != null)
+        {
+            activeGoalAreaTransform.gameObject.SetActive(true);
+        }
+
+        if (activeGoalAreaTransform == null)
+        {
+            ActiveGoalArea = null;
+            if (swarmManager != null) swarmManager.goalArea = null;
+            return;
+        }
+
+        GoalArea goalArea = activeGoalAreaTransform.GetComponent<GoalArea>();
+        if (goalArea == null)
+        {
+            goalArea = activeGoalAreaTransform.gameObject.AddComponent<GoalArea>();
+        }
+
+        // Tag logs with the motion type so console output is readable during batch runs.
+        goalArea.contextLabel = selectedSwarmType.ToString();
+
+        ActiveGoalArea = goalArea;
+        if (swarmManager != null) swarmManager.goalArea = goalArea;
     }
 
     public void ResetScene()
@@ -500,6 +656,9 @@ public class UI : MonoBehaviour
 
         SyncDefaultObstacleActiveState();
         PlaceDefaultObstacleAtDefaultSpawnLocation();
+
+        // Start every run with all walls present; recording rules disable per motion type afterwards.
+        EnableAllWalls();
 
         foreach (var agent in activeAgents)
         {
@@ -782,6 +941,13 @@ public class UI : MonoBehaviour
         {
             swarmManager.agents = activeAgents.ToArray();
             UpdateSwarmManager(); // Apply parameters after reset
+
+            // Clear any count carried over from the previous run so it cannot
+            // immediately satisfy the goal-area end condition.
+            if (ActiveGoalArea != null)
+            {
+                ActiveGoalArea.ResetTracking();
+            }
         }
     }
 

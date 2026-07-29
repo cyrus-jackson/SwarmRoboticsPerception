@@ -8,6 +8,10 @@ public class SwarmManager : MonoBehaviour
     public Collider2D commonFateCollider;
     public Transform centralObstacle;
 
+    [Header("Goal Area")]
+    [Tooltip("Target region for the current swarm type. Assigned by UI.cs from the per-type goal areas. Counts agents inside and can end a recording early.")]
+    public GoalArea goalArea;
+
     [Header("Swarm Parameters")]
     public float cohesionIntensity = 5.0f;    // cI
     public float separationIntensity = 1.0f;  // sI
@@ -67,7 +71,19 @@ public class SwarmManager : MonoBehaviour
                 pv.enabled = showPerceptionRadius;
             }
         }
+
+        // Recount agents inside the goal area after they have all moved this frame.
+        if (goalArea != null)
+        {
+            goalArea.Evaluate(agents);
+        }
     }
+
+    /// <summary>Percentage of agents currently inside the active goal area (0 when no area is set).</summary>
+    public float GoalAreaPercentInside => goalArea != null ? goalArea.PercentInside : 0f;
+
+    /// <summary>Number of agents currently inside the active goal area (0 when no area is set).</summary>
+    public int GoalAreaAgentsInside => goalArea != null ? goalArea.AgentsInside : 0;
 
     private void OnDrawGizmos()
     {

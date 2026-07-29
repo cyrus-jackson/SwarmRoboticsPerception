@@ -23,8 +23,42 @@ public enum SwarmParameterToRecord
     PerceptionRad
 }
 
+public enum RecordingEndCondition
+{
+    /// <summary>Always record for recordingTimePerSim seconds.</summary>
+    FixedDuration,
+    /// <summary>Stop as soon as goalAreaAgentPercent of the agents are inside the goal area, or at recordingTimePerSim — whichever comes first.</summary>
+    TargetAreaReached
+}
+
 public class SimRecorder : MonoBehaviour
 {
+    /// <summary>
+    /// Per motion type recording rules: how long to let the swarm settle before the recorder
+    /// starts, and what ends the recording.
+    /// </summary>
+    [System.Serializable]
+    public class MotionTypeRecordingSettings
+    {
+        public SwarmType swarmType;
+
+        [Tooltip("Seconds of simulation to run before the recorder starts, letting the swarm settle into formation. This warm-up is NOT captured in the video. Only applies while recording.")]
+        public float recordingStartDelay = 0f;
+
+        [Tooltip("Names of walls to disable for this motion type, e.g. Wall1. Must match the object names in the UI 'Wall Setup' list. All other walls stay enabled.")]
+        public List<string> wallsToDisable = new List<string>();
+
+        [Tooltip("FixedDuration: always record the full duration. TargetAreaReached: stop early once the percentage below is inside this type's goal area.")]
+        public RecordingEndCondition endCondition = RecordingEndCondition.FixedDuration;
+
+        [Tooltip("Percentage of agents that must be inside this type's goal area to end the recording early.")]
+        [Range(0f, 100f)]
+        public float goalAreaAgentPercent = 90f;
+
+        [Tooltip("Optional per-type maximum recording length. Leave at 0 to use the global recordingTimePerSim.")]
+        public float overrideRecordingTime = 0f;
+    }
+
     [System.Serializable]
     public class SimulationConfig
     {
@@ -52,6 +86,20 @@ public class SimRecorder : MonoBehaviour
         public float obstacleRadius;
         public float maxSpeed;
         public int numAgents;
+
+        // Goal area / end condition outcome, filled in after the recording window closes.
+        public string endReason;                     // "goal-area" or "timeout"
+        public string endConditionUsed;              // end condition configured for this motion type
+        public float recordingStartDelay;            // un-recorded settling time before capture began
+        public string wallsDisabled;                 // walls switched off for this motion type
+        public float recordedDuration;               // seconds of motion recorded
+        public float maxRecordingTime;               // duration cap that applied to this sim
+        public string goalAreaName;
+        public float goalAreaAgentPercentThreshold;  // 0 when the condition was FixedDuration
+        public int agentsInsideGoalAreaAtEnd;
+        public float percentInsideGoalAreaAtEnd;
+        public float videoFinishedOverlaySeconds;    // length of the "Video Finished" card
+        public float totalClipDuration;              // recordedDuration + overlay
     }
 
     [System.Serializable]
@@ -61,6 +109,8 @@ public class SimRecorder : MonoBehaviour
         public string folderName;
         public string timestamp;
         public float recordingTimePerSim;
+        public string endConditionsPerMotionType;
+        public float videoFinishedOverlayDuration;
         public string saveFolder;
         public SimulationConfig[] simulations;
     }
@@ -69,8 +119,29 @@ public class SimRecorder : MonoBehaviour
     public SwarmManager swarmManager;
 
     [Header("Recording Settings")]
+    [Tooltip("Maximum length of each recording. Acts as a timeout when the goal area end condition is enabled.")]
     public float recordingTimePerSim = 20f;
     public string saveFolder = "SimulationRecordings";
+
+    [Header("Recording Rules (per motion type)")]
+    [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
+    public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
+    {
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f }
+    };
+
+    [Header("End Of Video Overlay")]
+    [Tooltip("Show a full screen black card with centred text for the last moments of every recording.")]
+    public bool showVideoFinishedOverlay = true;
+    [Tooltip("Text shown in the centre of the black card.")]
+    public string videoFinishedText = "Video Finished";
+    [Tooltip("How long the black card stays on screen. Appended after the motion, so total clip length is motion + this.")]
+    public float videoFinishedOverlayDuration = 0.5f;
+    [Tooltip("Font size of the centred text.")]
+    public int videoFinishedFontSize = 72;
 
     [Header("Parameter 1 Modification")]
     public SwarmParameterToRecord parameterToRecord1 = SwarmParameterToRecord.PerceptionRad;
@@ -94,11 +165,11 @@ public class SimRecorder : MonoBehaviour
     [Header("Combinations Batch")]
     public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Random, SwarmType.Dispersion };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f, 30.0f, 64.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 32.0f, 64.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
     public float[] combinationParam2Values = new float[] { 0.15f, 3.15f, 40.15f };
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
-    public float[] combinationParam3Values = new float[] { 1.5f, 4.0f };
+    public float[] combinationParam3Values = new float[] { 1.5f, 3.0f };
 
     [Header("Single Parameter Batch")]
     public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.MaxSpeed;
@@ -123,6 +194,250 @@ public class SimRecorder : MonoBehaviour
     private bool isSwarmTypeBatchMode = false;
     private bool hideOverlayText = false;
     private SwarmType currentSwarmTypeDisplay;
+
+    // Outcome of the most recent recording window.
+    private float lastRecordedDuration;
+    private string lastEndReason = "timeout";
+    private string lastGoalAreaName;
+    private int lastAgentsInsideGoalArea;
+    private float lastPercentInsideGoalArea;
+    private SwarmType lastSwarmType;
+    private RecordingEndCondition lastEndConditionUsed;
+    private float lastEndConditionPercent;
+    private float lastMaxRecordingTime;
+    private float lastOverlayDuration;
+    private float lastStartDelay;
+    private string lastWallsDisabled = "";
+
+    // "Video Finished" card state.
+    private bool videoFinishedOverlayActive = false;
+    private Texture2D blackOverlayTexture;
+
+    /// <summary>
+    /// Returns the recording rules configured for a motion type, or a no-delay / FixedDuration
+    /// default when the type has no entry in the list.
+    /// </summary>
+    public MotionTypeRecordingSettings GetSettingsFor(SwarmType type)
+    {
+        if (motionTypeRecordingSettings != null)
+        {
+            foreach (MotionTypeRecordingSettings entry in motionTypeRecordingSettings)
+            {
+                if (entry != null && entry.swarmType == type) return entry;
+            }
+        }
+
+        return new MotionTypeRecordingSettings { swarmType = type, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration };
+    }
+
+    /// <summary>
+    /// Applies the current motion type's recording rules that must be in place before capture:
+    /// disables the walls listed for the type, then lets the swarm run un-recorded for the start
+    /// delay so it can settle into formation. Call after motion is enabled and before
+    /// StartRecording().
+    /// </summary>
+    private IEnumerator PrepareRecordingForMotionType()
+    {
+        SwarmType swarmType = CurrentSwarmType;
+        MotionTypeRecordingSettings settings = GetSettingsFor(swarmType);
+
+        // Walls: every wall is re-enabled first, then this type's list is disabled.
+        lastWallsDisabled = "";
+        if (uiController != null)
+        {
+            List<string> disabledWalls = uiController.ApplyWallsDisabledByName(settings.wallsToDisable);
+            lastWallsDisabled = disabledWalls.Count > 0 ? string.Join(", ", disabledWalls) : "";
+
+            if (disabledWalls.Count > 0)
+            {
+                Debug.Log($"[SimRecorder] {swarmType}: disabled walls — {lastWallsDisabled}.");
+            }
+        }
+
+        lastStartDelay = 0f;
+        if (settings.recordingStartDelay <= 0f) yield break;
+
+        Debug.Log($"[SimRecorder] {swarmType}: settling for {settings.recordingStartDelay:F2}s before the recorder starts.");
+
+        float delayTimer = 0f;
+        while (delayTimer < settings.recordingStartDelay)
+        {
+            yield return new WaitForEndOfFrame();
+            delayTimer += Time.deltaTime;
+        }
+
+        lastStartDelay = delayTimer;
+    }
+
+    /// <summary>
+    /// Human readable summary of the per-motion-type recording rules, stored in batch_config.json.
+    /// e.g. "Flocking:delay 3.0s,TargetAreaReached@90%; Random:delay 1.0s,FixedDuration".
+    /// </summary>
+    private string DescribeEndConditions()
+    {
+        if (motionTypeRecordingSettings == null || motionTypeRecordingSettings.Count == 0) return "FixedDuration (no per-type entries)";
+
+        List<string> parts = new List<string>();
+        foreach (MotionTypeRecordingSettings entry in motionTypeRecordingSettings)
+        {
+            if (entry == null) continue;
+
+            string description = entry.endCondition == RecordingEndCondition.TargetAreaReached
+                ? $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,TargetAreaReached@{entry.goalAreaAgentPercent:F0}%"
+                : $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,FixedDuration";
+
+            if (entry.overrideRecordingTime > 0f)
+            {
+                description += $" (max {entry.overrideRecordingTime:F1}s)";
+            }
+
+            if (entry.wallsToDisable != null && entry.wallsToDisable.Count > 0)
+            {
+                description += $" [walls off: {string.Join("/", entry.wallsToDisable)}]";
+            }
+
+            parts.Add(description);
+        }
+
+        return string.Join("; ", parts);
+    }
+
+    /// <summary>The motion type currently loaded in the scene.</summary>
+    private SwarmType CurrentSwarmType => uiController != null ? uiController.SelectedSwarmType : currentSwarmTypeDisplay;
+
+    /// <summary>
+    /// Runs a single recording window using the end condition of the current motion type: either
+    /// the full duration, or an early stop once that type's arrival percentage is inside its goal
+    /// area. The duration always acts as the upper bound. A "Video Finished" card is then held on
+    /// screen (and captured into the clip) before the recorder is stopped.
+    /// </summary>
+    private IEnumerator RunRecordingWindow()
+    {
+        SwarmType swarmType = CurrentSwarmType;
+        MotionTypeRecordingSettings settings = GetSettingsFor(swarmType);
+        GoalArea goalArea = ResolveGoalArea();
+
+        float maxTime = settings.overrideRecordingTime > 0f ? settings.overrideRecordingTime : recordingTimePerSim;
+        bool wantsGoalCondition = settings.endCondition == RecordingEndCondition.TargetAreaReached;
+        bool goalConditionEnabled = wantsGoalCondition && goalArea != null && settings.goalAreaAgentPercent > 0f;
+
+        lastEndReason = "timeout";
+        lastGoalAreaName = goalArea != null ? goalArea.name : null;
+        lastSwarmType = swarmType;
+        lastEndConditionUsed = settings.endCondition;
+        lastEndConditionPercent = wantsGoalCondition ? settings.goalAreaAgentPercent : 0f;
+        lastMaxRecordingTime = maxTime;
+
+        if (wantsGoalCondition && goalArea == null)
+        {
+            Debug.LogWarning($"[SimRecorder] {swarmType} is set to TargetAreaReached but has no goal area assigned; falling back to the {maxTime:F2}s duration.");
+        }
+
+        float timer = 0f;
+        while (timer < maxTime)
+        {
+            yield return new WaitForEndOfFrame();
+            timer += Time.deltaTime;
+
+            if (goalConditionEnabled && goalArea.IsPercentReached(settings.goalAreaAgentPercent))
+            {
+                lastEndReason = "goal-area";
+                Debug.Log($"[SimRecorder] {swarmType}: goal area '{goalArea.name}' reached {goalArea.AgentsInside}/{goalArea.TrackedAgents} agents ({goalArea.PercentInside:F1}% >= {settings.goalAreaAgentPercent:F1}%) after {timer:F2}s — ending recording early.");
+                break;
+            }
+        }
+
+        lastRecordedDuration = timer;
+        lastAgentsInsideGoalArea = goalArea != null ? goalArea.AgentsInside : 0;
+        lastPercentInsideGoalArea = goalArea != null ? goalArea.PercentInside : 0f;
+
+        if (lastEndReason == "timeout")
+        {
+            string goalSuffix = goalArea != null
+                ? $" — goal area '{goalArea.name}' held {lastAgentsInsideGoalArea}/{goalArea.TrackedAgents} agents ({lastPercentInsideGoalArea:F1}%)."
+                : ".";
+            Debug.Log($"[SimRecorder] {swarmType}: recording hit the {maxTime:F2}s duration{goalSuffix}");
+        }
+
+        // Hold the "Video Finished" card while still recording so it is baked into the clip.
+        lastOverlayDuration = 0f;
+        if (showVideoFinishedOverlay && videoFinishedOverlayDuration > 0f)
+        {
+            videoFinishedOverlayActive = true;
+
+            float overlayTimer = 0f;
+            while (overlayTimer < videoFinishedOverlayDuration)
+            {
+                yield return new WaitForEndOfFrame();
+                overlayTimer += Time.deltaTime;
+            }
+
+            videoFinishedOverlayActive = false;
+            lastOverlayDuration = overlayTimer;
+        }
+    }
+
+    /// <summary>The goal area currently in play, preferring the one UI.cs selected for the swarm type.</summary>
+    private GoalArea ResolveGoalArea()
+    {
+        if (uiController != null && uiController.ActiveGoalArea != null) return uiController.ActiveGoalArea;
+        if (swarmManager != null) return swarmManager.goalArea;
+        return null;
+    }
+
+    /// <summary>Copies the outcome of the last recording window into a simulation config entry.</summary>
+    private void ApplyRecordingOutcome(SimulationConfig config)
+    {
+        if (config == null) return;
+
+        config.endReason = lastEndReason;
+        config.recordedDuration = lastRecordedDuration;
+        config.goalAreaName = lastGoalAreaName;
+        config.endConditionUsed = lastEndConditionUsed.ToString();
+        config.recordingStartDelay = lastStartDelay;
+        config.wallsDisabled = lastWallsDisabled;
+        config.goalAreaAgentPercentThreshold = lastEndConditionPercent;
+        config.maxRecordingTime = lastMaxRecordingTime;
+        config.agentsInsideGoalAreaAtEnd = lastAgentsInsideGoalArea;
+        config.percentInsideGoalAreaAtEnd = lastPercentInsideGoalArea;
+        config.videoFinishedOverlaySeconds = lastOverlayDuration;
+        config.totalClipDuration = lastRecordedDuration + lastOverlayDuration;
+
+        if (string.IsNullOrEmpty(config.swarmType))
+        {
+            config.swarmType = lastSwarmType.ToString();
+        }
+    }
+
+    /// <summary>Full screen black card with centred text, captured into the recording.</summary>
+    private void DrawVideoFinishedOverlay()
+    {
+        if (blackOverlayTexture == null)
+        {
+            blackOverlayTexture = new Texture2D(1, 1);
+            blackOverlayTexture.SetPixel(0, 0, Color.black);
+            blackOverlayTexture.Apply();
+        }
+
+        Rect fullScreen = new Rect(0, 0, Screen.width, Screen.height);
+
+        GUI.depth = -1000; // draw in front of everything else
+        Color previousColor = GUI.color;
+        GUI.color = Color.white;
+        GUI.DrawTexture(fullScreen, blackOverlayTexture);
+
+        GUIStyle centeredStyle = new GUIStyle
+        {
+            fontSize = Mathf.Max(1, videoFinishedFontSize),
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter,
+            wordWrap = false
+        };
+        centeredStyle.normal.textColor = Color.white;
+
+        GUI.Label(fullScreen, videoFinishedText, centeredStyle);
+        GUI.color = previousColor;
+    }
 
     void OnGUI()
     {
@@ -155,8 +470,20 @@ public class SimRecorder : MonoBehaviour
                 displayText = $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
             }
 
+            GoalArea overlayGoalArea = ResolveGoalArea();
+            if (overlayGoalArea != null)
+            {
+                displayText += $" | In area: {overlayGoalArea.AgentsInside}/{overlayGoalArea.TrackedAgents}";
+            }
+
             GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
             GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
+        }
+
+        // Drawn last so it covers the parameter overlay text as well.
+        if (videoFinishedOverlayActive)
+        {
+            DrawVideoFinishedOverlay();
         }
     }
     public void StartSingleParameterBatchRecording()
@@ -246,6 +573,9 @@ public class SimRecorder : MonoBehaviour
             uiController.SetMotion(true);
         }
 
+        // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+        yield return PrepareRecordingForMotionType();
+
 #if UNITY_EDITOR
         var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
         var recorderController = new RecorderController(controllerSettings);
@@ -274,12 +604,7 @@ public class SimRecorder : MonoBehaviour
         Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-        float timer = 0f;
-        while (timer < recordingTimePerSim)
-        {
-            yield return new WaitForEndOfFrame();
-            timer += Time.deltaTime;
-        }
+        yield return RunRecordingWindow();
 
 #if UNITY_EDITOR
         recorderController.StopRecording();
@@ -308,6 +633,8 @@ public class SimRecorder : MonoBehaviour
             maxSpeed = swarmManager.maxSpeed,
             numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
         };
+
+        ApplyRecordingOutcome(config);
 
         string configJson = JsonUtility.ToJson(config, true);
         File.WriteAllText(Path.Combine(currentFolderPath, $"{fileName}_config.json"), configJson);
@@ -373,10 +700,21 @@ public class SimRecorder : MonoBehaviour
 
         int combinationIndex = 0;
 
+        // Upper bound on the number of clips (duplicate combinations are skipped as we go).
+        int plannedCombinations = 0;
+        foreach (SwarmType plannedType in combinationSwarmTypes)
+        {
+            plannedCombinations += GetCombinationParam1ValuesForType(plannedType).Length * combinationParam2Values.Length * combinationParam3Values.Length;
+        }
+
+        Debug.Log($"[SimRecorder] Combinations batch starting — up to {plannedCombinations} clips across types: {string.Join(", ", combinationSwarmTypes)}.");
+
         for (int typeIndex = 0; typeIndex < combinationSwarmTypes.Count; typeIndex++)
         {
             SwarmType swarmType = combinationSwarmTypes[typeIndex];
             float[] param1ValuesForType = GetCombinationParam1ValuesForType(swarmType);
+
+            Debug.Log($"[SimRecorder] === Motion type {typeIndex + 1}/{combinationSwarmTypes.Count}: {swarmType} ===");
 
             for (int param1Index = 0; param1Index < param1ValuesForType.Length; param1Index++)
             {
@@ -392,20 +730,27 @@ public class SimRecorder : MonoBehaviour
                         float currentParam3 = combinationParam3Values[param3Index];
 
                         uiController.SetSwarmType(swarmType);
+                        currentSwarmTypeDisplay = swarmType;
                         uiController.SetParameter(combinationParameter1, currentParam1);
                         uiController.SetParameter(combinationParameter2, currentParam2);
                         uiController.SetParameter(combinationParameter3, currentParam3);
 
                         string combinationKey = $"{swarmType}|{combinationParameter1}|{currentParam1:F4}|{combinationParameter2}|{currentParam2:F4}|{combinationParameter3}|{currentParam3:F4}";
-                        Debug.Log($"[SimRecorder] Current Combination: {combinationKey}");
+                        string combinationLabel = $"Type: {swarmType} | {combinationParameter1}: {currentParam1:F2} | {combinationParameter2}: {currentParam2:F2} | {combinationParameter3}: {currentParam3:F2}";
+
                         if (!seenCombinationKeys.Add(combinationKey))
                         {
-                            Debug.Log($"[SimRecorder] Skipping duplicate combination: {combinationKey}");
+                            Debug.Log($"[SimRecorder] Skipping duplicate — {combinationLabel}");
                             continue;
                         }
 
+                        Debug.Log($"[SimRecorder] Recording {combinationIndex + 1}/{plannedCombinations} — {combinationLabel}");
+
                         uiController.ResetScene();
                         uiController.SetMotion(true);
+
+                        // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                        yield return PrepareRecordingForMotionType();
 
                         string fileName = $"type_{swarmType.ToString().ToLower()}_{combinationParameter1.ToString().ToLower()}_{currentParam1:F2}_{combinationParameter2.ToString().ToLower()}_{currentParam2:F2}_{combinationParameter3.ToString().ToLower()}_{currentParam3:F2}";
                         fileName = SanitizeFileName(fileName);
@@ -467,19 +812,15 @@ public class SimRecorder : MonoBehaviour
                         Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                        float timer = 0f;
-                        while (timer < recordingTimePerSim)
-                        {
-                            yield return new WaitForEndOfFrame();
-                            timer += Time.deltaTime;
-                        }
+                        yield return RunRecordingWindow();
+                        ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
                         recorderController.StopRecording();
 #endif
 
                         uiController.SetMotion(false);
-                        Debug.Log($"[SimRecorder] Saved combinations recording to {targetFolderPath}/{fileName}.mp4");
+                        Debug.Log($"[SimRecorder] Saved {swarmType} clip {combinationIndex + 1}/{plannedCombinations} ({lastEndReason}, {lastRecordedDuration:F2}s) → {fileName}.mp4");
                         combinationIndex++;
                     }
                 }
@@ -492,6 +833,8 @@ public class SimRecorder : MonoBehaviour
             folderName = paramFolderName,
             timestamp = timestampFolder,
             recordingTimePerSim = recordingTimePerSim,
+            endConditionsPerMotionType = DescribeEndConditions(),
+            videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
             saveFolder = saveFolder,
             simulations = simulations.ToArray()
         };
@@ -554,6 +897,9 @@ public class SimRecorder : MonoBehaviour
             // Start simulation
             uiController.SetMotion(true);
 
+            // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+            yield return PrepareRecordingForMotionType();
+
             string fileName = $"{singleBatchParameter.ToString().ToLower()}_{currentParam:F2}";
             SimulationConfig config = new SimulationConfig
             {
@@ -596,7 +942,7 @@ public class SimRecorder : MonoBehaviour
                 OutputWidth = 1920,
                 OutputHeight = 1080
             };
-            
+
             videoRecorder.AudioInputSettings.PreserveAudio = false;
 
             controllerSettings.AddRecorderSettings(videoRecorder);
@@ -609,13 +955,8 @@ public class SimRecorder : MonoBehaviour
             Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-            float timer = 0f;
-
-            while (timer < recordingTimePerSim)
-            {
-                yield return new WaitForEndOfFrame();
-                timer += Time.deltaTime;
-            }
+            yield return RunRecordingWindow();
+            ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
             recorderController.StopRecording();
@@ -633,6 +974,8 @@ public class SimRecorder : MonoBehaviour
                 folderName = paramFolderName,
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
+                endConditionsPerMotionType = DescribeEndConditions(),
+                videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
             };
@@ -707,6 +1050,9 @@ public class SimRecorder : MonoBehaviour
                 // Start simulation
                 uiController.SetMotion(true);
 
+                // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                yield return PrepareRecordingForMotionType();
+
                 string fileName = $"{parameterToRecord1.ToString().ToLower()}_{currentParam1:F2}_{parameterToRecord2.ToString().ToLower()}_{currentParam2:F2}";
 
                 SimulationConfig config = new SimulationConfig
@@ -750,7 +1096,7 @@ public class SimRecorder : MonoBehaviour
                     OutputWidth = 1920,
                     OutputHeight = 1080
                 };
-                
+
                 videoRecorder.AudioInputSettings.PreserveAudio = false;
 
                 controllerSettings.AddRecorderSettings(videoRecorder);
@@ -763,13 +1109,8 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                float timer = 0f;
-
-                while (timer < recordingTimePerSim)
-                {
-                    yield return new WaitForEndOfFrame();
-                    timer += Time.deltaTime;
-                }
+                yield return RunRecordingWindow();
+                ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
                 recorderController.StopRecording();
@@ -788,6 +1129,8 @@ public class SimRecorder : MonoBehaviour
                 folderName = paramFolderName,
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
+                endConditionsPerMotionType = DescribeEndConditions(),
+                videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
             };
@@ -866,6 +1209,9 @@ public class SimRecorder : MonoBehaviour
                 uiController.ResetScene();
                 uiController.SetMotion(true);
 
+                // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                yield return PrepareRecordingForMotionType();
+
                 string obstacleSafe = SanitizeFileName(obstacle.name);
                 string fileName = $"obstacle_{obstacleSafe}_{obstacleBatchParameter.ToString().ToLower()}_{currentParam:F2}";
                 fileName = SanitizeFileName(fileName);
@@ -924,12 +1270,8 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                float timer = 0f;
-                while (timer < recordingTimePerSim)
-                {
-                    yield return new WaitForEndOfFrame();
-                    timer += Time.deltaTime;
-                }
+                yield return RunRecordingWindow();
+                ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
                 recorderController.StopRecording();
@@ -948,6 +1290,8 @@ public class SimRecorder : MonoBehaviour
                 folderName = paramFolderName,
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
+                endConditionsPerMotionType = DescribeEndConditions(),
+                videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
             };
@@ -1038,6 +1382,9 @@ public class SimRecorder : MonoBehaviour
                 uiController.ResetScene();
                 uiController.SetMotion(true);
 
+                // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                yield return PrepareRecordingForMotionType();
+
                 string obstacleSafe = SanitizeFileName(obstacle.name);
                 string spawnSafe = SanitizeFileName(spawn.name);
                 string fileName = $"obstacle_{obstacleSafe}_spawn_{spawnSafe}";
@@ -1098,12 +1445,8 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                float timer = 0f;
-                while (timer < recordingTimePerSim)
-                {
-                    yield return new WaitForEndOfFrame();
-                    timer += Time.deltaTime;
-                }
+                yield return RunRecordingWindow();
+                ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
                 recorderController.StopRecording();
@@ -1122,6 +1465,8 @@ public class SimRecorder : MonoBehaviour
                 folderName = paramFolderName,
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
+                endConditionsPerMotionType = DescribeEndConditions(),
+                videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
             };
@@ -1201,6 +1546,9 @@ public class SimRecorder : MonoBehaviour
                 uiController.ResetScene();
                 uiController.SetMotion(true);
 
+                // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                yield return PrepareRecordingForMotionType();
+
                 string typeSafe = SanitizeFileName(sType.ToString());
                 string fileName = $"type_{typeSafe}_{swarmTypeBatchParameter.ToString().ToLower()}_{currentParam:F2}";
                 fileName = SanitizeFileName(fileName);
@@ -1260,12 +1608,8 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                float timer = 0f;
-                while (timer < recordingTimePerSim)
-                {
-                    yield return new WaitForEndOfFrame();
-                    timer += Time.deltaTime;
-                }
+                yield return RunRecordingWindow();
+                ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
                 recorderController.StopRecording();
@@ -1284,6 +1628,8 @@ public class SimRecorder : MonoBehaviour
                 folderName = paramFolderName,
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
+                endConditionsPerMotionType = DescribeEndConditions(),
+                videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
             };
