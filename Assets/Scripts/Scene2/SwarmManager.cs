@@ -34,6 +34,14 @@ public class SwarmManager : MonoBehaviour
     [Header("Visualization")]
     public bool showPerceptionRadius = false;
 
+    [Header("Integration")]
+    [Tooltip("Fixed simulation step in seconds. Each frame's elapsed time is consumed in steps of this size using the paper's Euler update, so behaviour no longer depends on frame rate and fast agents cannot step over an obstacle in one go.")]
+    public float simulationStep = 1f / 120f;
+    [Tooltip("Maximum substeps per frame. Prevents a stall if the editor hitches; any leftover time is dropped.")]
+    public int maxSubstepsPerFrame = 16;
+
+    private float stepAccumulator = 0f;
+
     void Start()
     {
         if (commonFateTarget != null)
@@ -46,15 +54,11 @@ public class SwarmManager : MonoBehaviour
     {
         if (agents == null) return;
 
+        StepSimulation();
+
         foreach (GameObject agentObj in agents)
         {
             if (agentObj == null) continue;
-
-            SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
-            if (agent != null)
-            {
-                agent.UpdateAgent(this);
-            }
 
             // Runtime visualization: ensure each agent has a PerceptionVisualizer
             PerceptionVisualizer pv = agentObj.GetComponent<PerceptionVisualizer>();
@@ -77,6 +81,53 @@ public class SwarmManager : MonoBehaviour
         {
             goalArea.Evaluate(agents);
         }
+    }
+
+    /// <summary>
+    /// Advances the swarm by this frame's elapsed time, in fixed steps of simulationStep. The rule
+    /// set and the Euler update are unchanged from Hénard et al. (2024); only the step size is
+    /// subdivided, which keeps a fast agent from crossing an obstacle between two samples. The
+    /// random movement vector is drawn once per frame so its magnitude per unit time is unaffected
+    /// by the number of substeps.
+    /// </summary>
+    private void StepSimulation()
+    {
+        float step = Mathf.Max(0.0001f, simulationStep);
+        int stepCap = Mathf.Max(1, maxSubstepsPerFrame);
+
+        foreach (GameObject agentObj in agents)
+        {
+            if (agentObj == null) continue;
+
+            SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
+            if (agent != null) agent.SampleRandomMovement();
+        }
+
+        stepAccumulator += Time.deltaTime;
+
+        int stepsTaken = 0;
+        while (stepAccumulator >= step && stepsTaken < stepCap)
+        {
+            foreach (GameObject agentObj in agents)
+            {
+                if (agentObj == null) continue;
+
+                SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
+                if (agent != null) agent.UpdateAgent(this, step);
+            }
+
+            stepAccumulator -= step;
+            stepsTaken++;
+        }
+
+        // Drop any backlog rather than trying to catch up, which would produce a speed spike.
+        if (stepsTaken >= stepCap) stepAccumulator = 0f;
+    }
+
+    /// <summary>Clears the leftover time so a new run starts on a clean step boundary.</summary>
+    public void ResetIntegration()
+    {
+        stepAccumulator = 0f;
     }
 
     /// <summary>Percentage of agents currently inside the active goal area (0 when no area is set).</summary>

@@ -285,7 +285,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0caaee080601f42caa84192597b8699d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VideoGridManager
-  folderPath: Assets/SimulationRecordings/SwarmType_vs_RandomMovement/20260625_084344
+  folderPath: Assets/SimulationRecordings/Combinations/20260730_010136
   gridContainer: {fileID: 1219487762}
   topMainLabel: {fileID: 167985617}
   leftMainLabel: {fileID: 1289019110}
@@ -299,8 +299,8 @@ MonoBehaviour:
   - {fileID: 512825653}
   - {fileID: 385865648}
   - {fileID: 1362059079}
-  rows: 4
-  cols: 4
+  rows: 8
+  cols: 8
   renderWidth: 640
   renderHeight: 360
 --- !u!4 &233464112

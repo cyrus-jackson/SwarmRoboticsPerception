@@ -312,7 +312,7 @@ public class UI : MonoBehaviour
         uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 500);
 
         GUILayout.Label("<b>Perception</b>");
-        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 10, 30);
+        uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0.1f, 30f);
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
@@ -940,6 +940,7 @@ public class UI : MonoBehaviour
         if (swarmManager != null)
         {
             swarmManager.agents = activeAgents.ToArray();
+            swarmManager.ResetIntegration();
             UpdateSwarmManager(); // Apply parameters after reset
 
             // Clear any count carried over from the previous run so it cannot

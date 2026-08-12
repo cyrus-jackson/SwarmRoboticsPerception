@@ -5,7 +5,26 @@ public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
 
-    public void UpdateAgent(SwarmManager manager)
+    // Random movement rule (Hénard et al. 2024, rule 4): X and Y are drawn in [-0.5, 0.5].
+    // Sampled once per rendered frame and reused across the frame's substeps, so subdividing
+    // the integration step does not change the noise magnitude per unit time.
+    private Vector2 randomMovementDirection;
+
+    /// <summary>
+    /// Draws a new random movement vector. Called once per rendered frame by SwarmManager,
+    /// before that frame's integration substeps.
+    /// </summary>
+    public void SampleRandomMovement()
+    {
+        randomMovementDirection = new Vector2(Random.Range(-0.5f, 0.5f), Random.Range(-0.5f, 0.5f));
+    }
+
+    /// <summary>
+    /// One explicit Euler step of the paper's model:
+    ///   v(t) = v(t-1) + a(t) * dt
+    ///   p(t) = p(t-1) + v(t) * dt
+    /// </summary>
+    public void UpdateAgent(SwarmManager manager, float deltaTime)
     {
         Vector2 currentPosition = transform.position;
 
@@ -72,10 +91,8 @@ public class SwarmAgent : MonoBehaviour
         Vector2 overlappingAvoidanceForce = overlappingAvoidanceSum * manager.overlappingAvoidanceIntensity;
         acceleration += overlappingAvoidanceForce;
 
-        // Rule 4 Random movement rule
-        float randX = Random.Range(-0.5f, 0.5f);
-        float randY = Random.Range(-0.5f, 0.5f);
-        Vector2 randomMovementForce = new Vector2(randX, randY) * manager.randomMovementIntensity;
+        // Rule 4 Random movement rule (vector sampled once per frame, see SampleRandomMovement)
+        Vector2 randomMovementForce = randomMovementDirection * manager.randomMovementIntensity;
         acceleration += randomMovementForce;
 
         // Common Fate (Attraction to global target)
@@ -144,7 +161,7 @@ public class SwarmAgent : MonoBehaviour
         acceleration += frictionForce;
 
         // Apply Dynamics Updates
-        currentVelocity += acceleration * Time.deltaTime;
+        currentVelocity += acceleration * deltaTime;
 
         // Limit to max speed
         if (currentVelocity.magnitude > manager.maxSpeed)
@@ -152,7 +169,7 @@ public class SwarmAgent : MonoBehaviour
             currentVelocity = currentVelocity.normalized * manager.maxSpeed;
         }
 
-        transform.position += (Vector3)(currentVelocity * Time.deltaTime);
+        transform.position += (Vector3)(currentVelocity * deltaTime);
 
         // Face the direction of movement
         if (currentVelocity != Vector2.zero)

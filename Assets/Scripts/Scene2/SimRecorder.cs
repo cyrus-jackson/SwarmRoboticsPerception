@@ -111,6 +111,8 @@ public class SimRecorder : MonoBehaviour
         public float recordingTimePerSim;
         public string endConditionsPerMotionType;
         public float videoFinishedOverlayDuration;
+        public int frameRate;
+        public float simulationStep;
         public string saveFolder;
         public SimulationConfig[] simulations;
     }
@@ -121,6 +123,8 @@ public class SimRecorder : MonoBehaviour
     [Header("Recording Settings")]
     [Tooltip("Maximum length of each recording. Acts as a timeout when the goal area end condition is enabled.")]
     public float recordingTimePerSim = 20f;
+    [Tooltip("Capture frame rate. Hénard et al. (2024) presented stimuli at 60 fps.")]
+    public int recordingFrameRate = 60;
     public string saveFolder = "SimulationRecordings";
 
     [Header("Recording Rules (per motion type)")]
@@ -169,7 +173,7 @@ public class SimRecorder : MonoBehaviour
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
     public float[] combinationParam2Values = new float[] { 0.15f, 3.15f, 40.15f };
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
-    public float[] combinationParam3Values = new float[] { 1.5f, 3.0f };
+    public float[] combinationParam3Values = new float[] { 1.5f, 4.0f };
 
     [Header("Single Parameter Batch")]
     public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.MaxSpeed;
@@ -596,7 +600,7 @@ public class SimRecorder : MonoBehaviour
 
         controllerSettings.AddRecorderSettings(videoRecorder);
         controllerSettings.SetRecordModeToManual();
-        controllerSettings.FrameRate = 30;
+        controllerSettings.FrameRate = recordingFrameRate;
 
         recorderController.PrepareRecording();
         recorderController.StartRecording();
@@ -804,7 +808,7 @@ public class SimRecorder : MonoBehaviour
 
                         controllerSettings.AddRecorderSettings(videoRecorder);
                         controllerSettings.SetRecordModeToManual();
-                        controllerSettings.FrameRate = 30;
+                        controllerSettings.FrameRate = recordingFrameRate;
 
                         recorderController.PrepareRecording();
                         recorderController.StartRecording();
@@ -834,6 +838,8 @@ public class SimRecorder : MonoBehaviour
             timestamp = timestampFolder,
             recordingTimePerSim = recordingTimePerSim,
             endConditionsPerMotionType = DescribeEndConditions(),
+            frameRate = recordingFrameRate,
+            simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
             videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
             saveFolder = saveFolder,
             simulations = simulations.ToArray()
@@ -947,7 +953,7 @@ public class SimRecorder : MonoBehaviour
 
             controllerSettings.AddRecorderSettings(videoRecorder);
             controllerSettings.SetRecordModeToManual();
-            controllerSettings.FrameRate = 30;
+            controllerSettings.FrameRate = recordingFrameRate;
 
             recorderController.PrepareRecording();
             recorderController.StartRecording();
@@ -975,6 +981,8 @@ public class SimRecorder : MonoBehaviour
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
+                frameRate = recordingFrameRate,
+                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -1101,7 +1109,7 @@ public class SimRecorder : MonoBehaviour
 
                 controllerSettings.AddRecorderSettings(videoRecorder);
                 controllerSettings.SetRecordModeToManual();
-                controllerSettings.FrameRate = 30;
+                controllerSettings.FrameRate = recordingFrameRate;
 
                 recorderController.PrepareRecording();
                 recorderController.StartRecording();
@@ -1130,6 +1138,8 @@ public class SimRecorder : MonoBehaviour
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
+                frameRate = recordingFrameRate,
+                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -1262,7 +1272,7 @@ public class SimRecorder : MonoBehaviour
 
                 controllerSettings.AddRecorderSettings(videoRecorder);
                 controllerSettings.SetRecordModeToManual();
-                controllerSettings.FrameRate = 30;
+                controllerSettings.FrameRate = recordingFrameRate;
 
                 recorderController.PrepareRecording();
                 recorderController.StartRecording();
@@ -1291,6 +1301,8 @@ public class SimRecorder : MonoBehaviour
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
+                frameRate = recordingFrameRate,
+                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -1437,7 +1449,7 @@ public class SimRecorder : MonoBehaviour
 
                 controllerSettings.AddRecorderSettings(videoRecorder);
                 controllerSettings.SetRecordModeToManual();
-                controllerSettings.FrameRate = 30;
+                controllerSettings.FrameRate = recordingFrameRate;
 
                 recorderController.PrepareRecording();
                 recorderController.StartRecording();
@@ -1466,6 +1478,8 @@ public class SimRecorder : MonoBehaviour
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
+                frameRate = recordingFrameRate,
+                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -1600,7 +1614,7 @@ public class SimRecorder : MonoBehaviour
 
                 controllerSettings.AddRecorderSettings(videoRecorder);
                 controllerSettings.SetRecordModeToManual();
-                controllerSettings.FrameRate = 30;
+                controllerSettings.FrameRate = recordingFrameRate;
 
                 recorderController.PrepareRecording();
                 recorderController.StartRecording();
@@ -1629,6 +1643,8 @@ public class SimRecorder : MonoBehaviour
                 timestamp = timestampFolder,
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
+                frameRate = recordingFrameRate,
+                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
