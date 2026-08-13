@@ -28,7 +28,9 @@ public enum RecordingEndCondition
     /// <summary>Always record for recordingTimePerSim seconds.</summary>
     FixedDuration,
     /// <summary>Stop as soon as goalAreaAgentPercent of the agents are inside the goal area, or at recordingTimePerSim — whichever comes first.</summary>
-    TargetAreaReached
+    TargetAreaReached,
+    /// <summary>Stop once the swarm's spread reaches densityTargetRatio of its value at recording start, or at recordingTimePerSim — whichever comes first.</summary>
+    DensityRatioReached
 }
 
 public class SimRecorder : MonoBehaviour
@@ -54,6 +56,12 @@ public class SimRecorder : MonoBehaviour
         [Tooltip("Percentage of agents that must be inside this type's goal area to end the recording early.")]
         [Range(0f, 100f)]
         public float goalAreaAgentPercent = 90f;
+
+        [Tooltip("Which spread measure the density end condition uses for this motion type.")]
+        public SwarmDensityMetric densityMetric = SwarmDensityMetric.TrimmedHullArea;
+
+        [Tooltip("Target ratio against the value measured at recording start. Below 1 is a contraction test (0.4 = shrunk to 40%), above 1 an expansion test (1.8 = grown to 180%).")]
+        public float densityTargetRatio = 0.25f;
 
         [Tooltip("Optional per-type maximum recording length. Leave at 0 to use the global recordingTimePerSim.")]
         public float overrideRecordingTime = 0f;
@@ -92,6 +100,11 @@ public class SimRecorder : MonoBehaviour
         public string endConditionUsed;              // end condition configured for this motion type
         public float recordingStartDelay;            // un-recorded settling time before capture began
         public string wallsDisabled;                 // walls switched off for this motion type
+        public string densityMetric;                 // spread measure sampled for this sim
+        public float densityBaseline;                // metric value at recording start
+        public float densityAtEnd;                   // metric value when the clip ended
+        public float densityRatioAtEnd;              // densityAtEnd / densityBaseline
+        public float densityTargetRatio;             // 0 when the condition was not DensityRatioReached
         public float recordedDuration;               // seconds of motion recorded
         public float maxRecordingTime;               // duration cap that applied to this sim
         public string goalAreaName;
@@ -132,9 +145,9 @@ public class SimRecorder : MonoBehaviour
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
         new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityTargetRatio = 0.25f },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f }
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityTargetRatio = 15f }
     };
 
     [Header("End Of Video Overlay")]
@@ -161,24 +174,24 @@ public class SimRecorder : MonoBehaviour
 
     [Header("SwarmType + Parameter Batch")]
     public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Random, SwarmType.Dispersion };
-    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.MaxSpeed;
-    public float swarmTypeParamStart = 1.0f;
-    public float swarmTypeParamStep = 1.0f;
+    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.PerceptionRad;
+    public float swarmTypeParamStart = 1.5f;
+    public float swarmTypeParamStep = 1f;
     public int swarmTypeParamIterations = 4;
 
     [Header("Combinations Batch")]
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Random, SwarmType.Dispersion };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Dispersion };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f, 32.0f, 64.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f, 80.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
-    public float[] combinationParam2Values = new float[] { 0.15f, 3.15f, 40.15f };
+    public float[] combinationParam2Values = new float[] { 0.15f, 3.15f, 42.15f };
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
     public float[] combinationParam3Values = new float[] { 1.5f, 4.0f };
 
     [Header("Single Parameter Batch")]
-    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.MaxSpeed;
+    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.PerceptionRad;
     public float singleParamStart = 0.15f;
-    public float singleParamStep = 2.8f;
+    public float singleParamStep = 1.5f;
     public int singleParamIterations = 16;
 
     [Header("Obstacle Batch (Obstacle List + 1 Parameter)")]
@@ -212,6 +225,11 @@ public class SimRecorder : MonoBehaviour
     private float lastOverlayDuration;
     private float lastStartDelay;
     private string lastWallsDisabled = "";
+    private string lastDensityMetricName;
+    private float lastDensityBaseline;
+    private float lastDensityValue;
+    private float lastDensityRatio;
+    private float lastDensityTargetRatio;
 
     // "Video Finished" card state.
     private bool videoFinishedOverlayActive = false;
@@ -259,18 +277,42 @@ public class SimRecorder : MonoBehaviour
         }
 
         lastStartDelay = 0f;
-        if (settings.recordingStartDelay <= 0f) yield break;
 
-        Debug.Log($"[SimRecorder] {swarmType}: settling for {settings.recordingStartDelay:F2}s before the recorder starts.");
-
-        float delayTimer = 0f;
-        while (delayTimer < settings.recordingStartDelay)
+        if (settings.recordingStartDelay > 0f)
         {
-            yield return new WaitForEndOfFrame();
-            delayTimer += Time.deltaTime;
+            Debug.Log($"[SimRecorder] {swarmType}: settling for {settings.recordingStartDelay:F2}s before the recorder starts.");
+
+            float delayTimer = 0f;
+            while (delayTimer < settings.recordingStartDelay)
+            {
+                yield return new WaitForEndOfFrame();
+                delayTimer += Time.deltaTime;
+            }
+
+            lastStartDelay = delayTimer;
         }
 
-        lastStartDelay = delayTimer;
+        // Baseline the density metric after settling, so the warm-up contraction is not counted
+        // toward the threshold.
+        CaptureDensityBaseline(settings);
+    }
+
+    /// <summary>Points the monitor at this motion type's metric and takes the reference measurement.</summary>
+    private void CaptureDensityBaseline(MotionTypeRecordingSettings settings)
+    {
+        SwarmDensityMonitor monitor = ResolveDensityMonitor();
+        if (monitor == null) return;
+
+        monitor.metric = settings.densityMetric;
+        monitor.CaptureBaseline(swarmManager != null ? swarmManager.agents : null);
+    }
+
+    /// <summary>The density monitor in play, preferring the one the UI provisioned.</summary>
+    private SwarmDensityMonitor ResolveDensityMonitor()
+    {
+        if (uiController != null && uiController.densityMonitor != null) return uiController.densityMonitor;
+        if (swarmManager != null) return swarmManager.densityMonitor;
+        return null;
     }
 
     /// <summary>
@@ -286,9 +328,21 @@ public class SimRecorder : MonoBehaviour
         {
             if (entry == null) continue;
 
-            string description = entry.endCondition == RecordingEndCondition.TargetAreaReached
-                ? $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,TargetAreaReached@{entry.goalAreaAgentPercent:F0}%"
-                : $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,FixedDuration";
+            string rule;
+            switch (entry.endCondition)
+            {
+                case RecordingEndCondition.TargetAreaReached:
+                    rule = $"TargetAreaReached@{entry.goalAreaAgentPercent:F0}%";
+                    break;
+                case RecordingEndCondition.DensityRatioReached:
+                    rule = $"DensityRatioReached[{entry.densityMetric}]@{entry.densityTargetRatio:F2}";
+                    break;
+                default:
+                    rule = "FixedDuration";
+                    break;
+            }
+
+            string description = $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,{rule}";
 
             if (entry.overrideRecordingTime > 0f)
             {
@@ -320,10 +374,13 @@ public class SimRecorder : MonoBehaviour
         SwarmType swarmType = CurrentSwarmType;
         MotionTypeRecordingSettings settings = GetSettingsFor(swarmType);
         GoalArea goalArea = ResolveGoalArea();
+        SwarmDensityMonitor densityMonitor = ResolveDensityMonitor();
 
         float maxTime = settings.overrideRecordingTime > 0f ? settings.overrideRecordingTime : recordingTimePerSim;
         bool wantsGoalCondition = settings.endCondition == RecordingEndCondition.TargetAreaReached;
         bool goalConditionEnabled = wantsGoalCondition && goalArea != null && settings.goalAreaAgentPercent > 0f;
+        bool wantsDensityCondition = settings.endCondition == RecordingEndCondition.DensityRatioReached;
+        bool densityConditionEnabled = wantsDensityCondition && densityMonitor != null && settings.densityTargetRatio > 0f;
 
         lastEndReason = "timeout";
         lastGoalAreaName = goalArea != null ? goalArea.name : null;
@@ -335,6 +392,11 @@ public class SimRecorder : MonoBehaviour
         if (wantsGoalCondition && goalArea == null)
         {
             Debug.LogWarning($"[SimRecorder] {swarmType} is set to TargetAreaReached but has no goal area assigned; falling back to the {maxTime:F2}s duration.");
+        }
+
+        if (wantsDensityCondition && densityMonitor == null)
+        {
+            Debug.LogWarning($"[SimRecorder] {swarmType} is set to DensityRatioReached but no density monitor was found; falling back to the {maxTime:F2}s duration.");
         }
 
         float timer = 0f;
@@ -349,11 +411,23 @@ public class SimRecorder : MonoBehaviour
                 Debug.Log($"[SimRecorder] {swarmType}: goal area '{goalArea.name}' reached {goalArea.AgentsInside}/{goalArea.TrackedAgents} agents ({goalArea.PercentInside:F1}% >= {settings.goalAreaAgentPercent:F1}%) after {timer:F2}s — ending recording early.");
                 break;
             }
+
+            if (densityConditionEnabled && densityMonitor.IsRatioReached(settings.densityTargetRatio))
+            {
+                lastEndReason = "density-ratio";
+                Debug.Log($"[SimRecorder] {swarmType}: {densityMonitor.MetricName} {densityMonitor.CurrentValue:F3} / baseline {densityMonitor.Baseline:F3} = ratio {densityMonitor.Ratio:F2} (target {settings.densityTargetRatio:F2}) after {timer:F2}s — ending recording early.");
+                break;
+            }
         }
 
         lastRecordedDuration = timer;
         lastAgentsInsideGoalArea = goalArea != null ? goalArea.AgentsInside : 0;
         lastPercentInsideGoalArea = goalArea != null ? goalArea.PercentInside : 0f;
+        lastDensityMetricName = densityMonitor != null ? densityMonitor.MetricName : null;
+        lastDensityBaseline = densityMonitor != null ? densityMonitor.Baseline : 0f;
+        lastDensityValue = densityMonitor != null ? densityMonitor.CurrentValue : 0f;
+        lastDensityRatio = densityMonitor != null ? densityMonitor.Ratio : 0f;
+        lastDensityTargetRatio = wantsDensityCondition ? settings.densityTargetRatio : 0f;
 
         if (lastEndReason == "timeout")
         {
@@ -400,6 +474,11 @@ public class SimRecorder : MonoBehaviour
         config.endConditionUsed = lastEndConditionUsed.ToString();
         config.recordingStartDelay = lastStartDelay;
         config.wallsDisabled = lastWallsDisabled;
+        config.densityMetric = lastDensityMetricName;
+        config.densityBaseline = lastDensityBaseline;
+        config.densityAtEnd = lastDensityValue;
+        config.densityRatioAtEnd = lastDensityRatio;
+        config.densityTargetRatio = lastDensityTargetRatio;
         config.goalAreaAgentPercentThreshold = lastEndConditionPercent;
         config.maxRecordingTime = lastMaxRecordingTime;
         config.agentsInsideGoalAreaAtEnd = lastAgentsInsideGoalArea;
@@ -478,6 +557,12 @@ public class SimRecorder : MonoBehaviour
             if (overlayGoalArea != null)
             {
                 displayText += $" | In area: {overlayGoalArea.AgentsInside}/{overlayGoalArea.TrackedAgents}";
+            }
+
+            SwarmDensityMonitor overlayDensity = ResolveDensityMonitor();
+            if (overlayDensity != null && overlayDensity.HasBaseline)
+            {
+                displayText += $" | Density ratio: {overlayDensity.Ratio:F2}";
             }
 
             GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
@@ -1552,10 +1637,6 @@ public class SimRecorder : MonoBehaviour
                 uiController.SetSwarmType(sType);
                 uiController.SetParameter(swarmTypeBatchParameter, currentParam);
 
-                if (swarmTypeBatchParameter != SwarmParameterToRecord.PerceptionRad)
-                {
-                    uiController.SetParameter(SwarmParameterToRecord.PerceptionRad, 46f);
-                }
 
                 uiController.ResetScene();
                 uiController.SetMotion(true);

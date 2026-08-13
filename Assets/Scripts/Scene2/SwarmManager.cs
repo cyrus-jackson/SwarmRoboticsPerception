@@ -12,11 +12,15 @@ public class SwarmManager : MonoBehaviour
     [Tooltip("Target region for the current swarm type. Assigned by UI.cs from the per-type goal areas. Counts agents inside and can end a recording early.")]
     public GoalArea goalArea;
 
+    [Header("Density")]
+    [Tooltip("Tracks how spread out the swarm is against a baseline. Provisioned by UI.cs if left empty.")]
+    public SwarmDensityMonitor densityMonitor;
+
     [Header("Swarm Parameters")]
     public float cohesionIntensity = 5.0f;    // cI
     public float separationIntensity = 1.0f;  // sI
     public float alignmentIntensity = 2.0f;   // aI
-    public float frictionIntensity = 0.1f;    // fI
+    public float frictionIntensity = 0.9f;    // fI
     public float randomMovementIntensity = 1.0f; // rI
 
     [Header("Overlapping Avoidance (Agent to Agent)")]
@@ -33,6 +37,8 @@ public class SwarmManager : MonoBehaviour
 
     [Header("Visualization")]
     public bool showPerceptionRadius = false;
+    [Tooltip("Draw the measured density region as a runtime outline, visible in the Game view.")]
+    public bool showDensityArea = false;
 
     [Header("Integration")]
     [Tooltip("Fixed simulation step in seconds. Each frame's elapsed time is consumed in steps of this size using the paper's Euler update, so behaviour no longer depends on frame rate and fast agents cannot step over an obstacle in one go.")]
@@ -80,6 +86,13 @@ public class SwarmManager : MonoBehaviour
         if (goalArea != null)
         {
             goalArea.Evaluate(agents);
+        }
+
+        // Resample the swarm density metric (throttled internally). While paused the monitor
+        // samples itself instead, and it also owns the runtime outline's enabled state.
+        if (densityMonitor != null)
+        {
+            densityMonitor.Evaluate(agents);
         }
     }
 

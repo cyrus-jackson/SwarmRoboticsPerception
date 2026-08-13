@@ -54,6 +54,14 @@ public class UI : MonoBehaviour
     [Tooltip("The common fate specifically for Flocking type")]
     public Transform flockingCommonFate;
 
+    [Header("Density Rule")]
+    [Tooltip("Density monitor used by the density end condition. Added to the SwarmManager object automatically if left empty.")]
+    public SwarmDensityMonitor densityMonitor;
+    [Tooltip("Target ratio shown and tuned in the play mode panel. Below 1 means contract to that fraction of the starting spread, above 1 means expand to that multiple.")]
+    public float densityTargetRatio = 0.4f;
+    [Tooltip("Show the live density readout in the panel while playing outside of a recording.")]
+    public bool showDensityReadout = true;
+
     [Header("Wall Setup")]
     [Tooltip("Walls in the scene. Recording rules can disable individual walls by name per motion type.")]
     public List<Transform> walls = new List<Transform>();
@@ -76,7 +84,7 @@ public class UI : MonoBehaviour
     private bool isRunning = false;
     List<GameObject> agentsInRange = new List<GameObject>();
 
-    private int uiNumberOfAgents = 42;
+    private int uiNumberOfAgents = 40;
     private List<GameObject> activeAgents = new List<GameObject>();
 
     // UI Configuration values
@@ -88,7 +96,7 @@ public class UI : MonoBehaviour
     private float uiCohesion = 5.0f;
     private float uiSeparation = 1.0f;
     private float uiAlignment = 2.0f;
-    private float uiFriction = 0.1f;
+    private float uiFriction = 0.9f;
     private float uiRandomMvmt = 0.0f;
     private float uiNeighbourSpread = 1.0f;
 
@@ -100,6 +108,7 @@ public class UI : MonoBehaviour
     private float uiObstacleRad = 0.1f;
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = false;
+    private bool uiShowDensityArea = false;
     private Vector2 scrollPosition;
     private Texture2D bgTexture;
 
@@ -109,8 +118,27 @@ public class UI : MonoBehaviour
             swarmManager.enabled = false;
 
         CollectWallsFromRoot();
+        EnsureDensityMonitor();
         ApplyPreset(selectedSwarmType);
         ResetScene();
+    }
+
+    /// <summary>Finds or adds the density monitor on the SwarmManager object and links it up.</summary>
+    private void EnsureDensityMonitor()
+    {
+        if (swarmManager == null) return;
+
+        if (densityMonitor == null)
+        {
+            densityMonitor = swarmManager.GetComponent<SwarmDensityMonitor>();
+            if (densityMonitor == null)
+            {
+                densityMonitor = swarmManager.gameObject.AddComponent<SwarmDensityMonitor>();
+            }
+        }
+
+        densityMonitor.swarmManager = swarmManager;
+        swarmManager.densityMonitor = densityMonitor;
     }
 
     /// <summary>Adds the children of wallsRoot to the wall list, skipping duplicates.</summary>
@@ -316,8 +344,15 @@ public class UI : MonoBehaviour
         uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
+        GUILayout.Space(10); GUILayout.Label("<b>Density End Rule</b>");
+        DrawDensityControls();
+
         GUILayout.Space(10); GUILayout.Label("<b>Visualization</b>");
         uiShowPerceptionRadius = GUILayout.Toggle(uiShowPerceptionRadius, " Show Perception Radius");
+        uiShowDensityArea = GUILayout.Toggle(uiShowDensityArea, " Show Density Area");
+        // Pushed straight through so the outline also responds while motion is paused.
+        if (swarmManager != null) swarmManager.showDensityArea = uiShowDensityArea;
+        DrawVideoFinishedToggle();
 
         GUILayout.Space(10);
         if (GUILayout.Button("Apply Settings to Active Swarm"))
@@ -449,6 +484,80 @@ public class UI : MonoBehaviour
         {
             UpdateSwarmManager();
             swarmManager.enabled = isRunning;
+
+            // Baseline the density metric at the moment motion starts. SimRecorder re-captures it
+            // after the warm-up delay so settling does not count toward the threshold.
+            if (isRunning && densityMonitor != null)
+            {
+                densityMonitor.CaptureBaseline(swarmManager.agents);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Toggle for the black "Video Finished" card the recorder appends to every clip. Reads and
+    /// writes the recorder's own field so the panel and the Inspector never disagree.
+    /// </summary>
+    private void DrawVideoFinishedToggle()
+    {
+        SimRecorder recorder = GetComponent<SimRecorder>();
+        if (recorder == null)
+        {
+            GUILayout.Label(" (no SimRecorder for the Video Finished card)");
+            return;
+        }
+
+        bool showOverlay = GUILayout.Toggle(recorder.showVideoFinishedOverlay, $" Show \"{recorder.videoFinishedText}\" Overlay");
+        if (showOverlay != recorder.showVideoFinishedOverlay)
+        {
+            recorder.showVideoFinishedOverlay = showOverlay;
+        }
+
+        if (showOverlay)
+        {
+            recorder.videoFinishedOverlayDuration = DrawSlider("Overlay Secs", recorder.videoFinishedOverlayDuration, 0.5f, 5f);
+        }
+    }
+
+    /// <summary>
+    /// Metric selector, threshold slider and live readout for the density end rule. Visible in the
+    /// play mode panel so the rule can be tuned without starting a recording.
+    /// </summary>
+    private void DrawDensityControls()
+    {
+        if (densityMonitor == null)
+        {
+            GUILayout.Label("No density monitor assigned.");
+            return;
+        }
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Metric", GUILayout.Width(110));
+        SwarmDensityMetric newMetric = (SwarmDensityMetric)GUILayout.Toolbar(
+            (int)densityMonitor.metric,
+            new string[] { "Trimmed Hull", "Mean KNN" });
+        GUILayout.EndHorizontal();
+
+        if (newMetric != densityMonitor.metric)
+        {
+            densityMonitor.metric = newMetric;
+            // Rebaseline: the two metrics are on different scales.
+            if (isRunning) densityMonitor.CaptureBaseline(swarmManager != null ? swarmManager.agents : null);
+        }
+
+        densityTargetRatio = DrawSlider("Target Ratio", densityTargetRatio, 0.05f, 3f);
+
+        if (showDensityReadout)
+        {
+            // Shown whether or not motion is running: while paused the monitor samples itself, so
+            // the hull area and mean degree of the current arrangement stay visible.
+            GUILayout.Label(densityMonitor.Describe(densityTargetRatio));
+            GUILayout.Label(densityMonitor.DescribeConnectivity());
+        }
+
+        if (GUILayout.Button("Rebaseline Density"))
+        {
+            densityMonitor.CaptureBaseline(swarmManager != null ? swarmManager.agents : null);
         }
     }
 
@@ -503,6 +612,7 @@ public class UI : MonoBehaviour
         swarmManager.maxSpeed = uiMaxSpeed;
 
         swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
+        swarmManager.showDensityArea = uiShowDensityArea;
 
         Transform defaultObstacle = GetDefaultObstacle();
         if (defaultObstacle != null)
@@ -643,6 +753,7 @@ public class UI : MonoBehaviour
 
         // Tag logs with the motion type so console output is readable during batch runs.
         goalArea.contextLabel = selectedSwarmType.ToString();
+        if (densityMonitor != null) densityMonitor.contextLabel = selectedSwarmType.ToString();
 
         ActiveGoalArea = goalArea;
         if (swarmManager != null) swarmManager.goalArea = goalArea;
@@ -948,6 +1059,11 @@ public class UI : MonoBehaviour
             if (ActiveGoalArea != null)
             {
                 ActiveGoalArea.ResetTracking();
+            }
+
+            if (densityMonitor != null)
+            {
+                densityMonitor.ResetTracking();
             }
         }
     }

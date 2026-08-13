@@ -5,8 +5,9 @@ using UnityEngine;
 [CustomEditor(typeof(SimRecorder))]
 public class SimRecorderEditor : Editor
 {
-    private static readonly string[] EndConditionLabels = { "Fixed Duration", "Target Area Reached" };
+    private static readonly string[] EndConditionLabels = { "Fixed Duration", "Target Area Reached", "Density Ratio Reached" };
     private const int TargetAreaReachedIndex = 1;
+    private const int DensityRatioReachedIndex = 2;
 
     private SerializedProperty motionTypeSettingsProperty;
 
@@ -38,6 +39,8 @@ public class SimRecorderEditor : Editor
                 SerializedProperty wallsToDisable = entry.FindPropertyRelative("wallsToDisable");
                 SerializedProperty endCondition = entry.FindPropertyRelative("endCondition");
                 SerializedProperty percent = entry.FindPropertyRelative("goalAreaAgentPercent");
+                SerializedProperty densityMetric = entry.FindPropertyRelative("densityMetric");
+                SerializedProperty densityTargetRatio = entry.FindPropertyRelative("densityTargetRatio");
                 SerializedProperty overrideTime = entry.FindPropertyRelative("overrideRecordingTime");
 
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -53,6 +56,12 @@ public class SimRecorderEditor : Editor
                 using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != TargetAreaReachedIndex))
                 {
                     EditorGUILayout.Slider(percent, 0f, 100f, new GUIContent("Agents Inside %"));
+                }
+
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != DensityRatioReachedIndex))
+                {
+                    EditorGUILayout.PropertyField(densityMetric, new GUIContent("Density Metric"));
+                    EditorGUILayout.Slider(densityTargetRatio, 0.05f, 3f, new GUIContent("Target Ratio (<1 shrink)"));
                 }
 
                 EditorGUILayout.PropertyField(overrideTime, new GUIContent("Max Time Override (0 = global)"));

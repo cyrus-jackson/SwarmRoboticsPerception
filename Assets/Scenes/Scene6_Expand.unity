@@ -480,8 +480,8 @@ Transform:
   m_GameObject: {fileID: 258019499}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -6.6099, y: -2.7399, z: 0}
-  m_LocalScale: {x: 6, y: 6, z: 0}
+  m_LocalPosition: {x: -7.3, y: -3.6, z: 0}
+  m_LocalScale: {x: 7.7184415, y: 7.503822, z: 0}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -643,7 +643,7 @@ Rigidbody2D:
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_GravityScale: 0
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 6200000, guid: a84392c7992a242fbb075c1fcbffeac6, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -866,8 +866,8 @@ Transform:
   m_GameObject: {fileID: 541087703}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -6.6099, y: -2.7399, z: 0}
-  m_LocalScale: {x: 6, y: 6, z: 0}
+  m_LocalPosition: {x: -6.4, y: -3.5, z: 0}
+  m_LocalScale: {x: 7.5, y: 7.5, z: 0}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1579,8 +1579,8 @@ Transform:
   m_GameObject: {fileID: 911438469}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.1552, y: -0.03, z: 0}
-  m_LocalScale: {x: 18.169586, y: 8.127956, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 25, y: 15, z: 0}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1620,6 +1620,7 @@ MonoBehaviour:
   commonFateCollider: {fileID: 236683211}
   centralObstacle: {fileID: 1089375806}
   goalArea: {fileID: 0}
+  densityMonitor: {fileID: 0}
   cohesionIntensity: 2
   separationIntensity: 1
   alignmentIntensity: 4
@@ -1632,6 +1633,7 @@ MonoBehaviour:
   obstacleAvoidanceRadius: 0.85
   maxSpeed: 1.5
   showPerceptionRadius: 1
+  showDensityArea: 0
   simulationStep: 0.008333334
   maxSubstepsPerFrame: 16
 --- !u!4 &912726474
@@ -2379,8 +2381,8 @@ Transform:
   m_GameObject: {fileID: 1159210623}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.2076, y: 0.12, z: 0}
-  m_LocalScale: {x: 19.951725, y: 9.910772, z: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 25, y: 15, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -2913,6 +2915,9 @@ MonoBehaviour:
   densificationCommonFate: {fileID: 637293462}
   flockingSpawnArea: {fileID: 504839798}
   flockingCommonFate: {fileID: 236683210}
+  densityMonitor: {fileID: 0}
+  densityTargetRatio: 0.4
+  showDensityReadout: 1
   walls:
   - {fileID: 997560498}
   - {fileID: 1658453500}
