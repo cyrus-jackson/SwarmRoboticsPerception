@@ -93,7 +93,9 @@ public class SimRecorder : MonoBehaviour
         public float envAvoidance;
         public float obstacleRadius;
         public float maxSpeed;
-        public int numAgents;
+        public int numAgents;            // agents actually spawned
+        public int requestedAgents;      // agents asked for
+        public bool agentSpawnShortfall; // true when fewer spawned than requested
 
         // Goal area / end condition outcome, filled in after the recording window closes.
         public string endReason;                     // "goal-area" or "timeout"
@@ -135,19 +137,24 @@ public class SimRecorder : MonoBehaviour
 
     [Header("Recording Settings")]
     [Tooltip("Maximum length of each recording. Acts as a timeout when the goal area end condition is enabled.")]
-    public float recordingTimePerSim = 20f;
+    public float recordingTimePerSim = 60f;
     [Tooltip("Capture frame rate. Hénard et al. (2024) presented stimuli at 60 fps.")]
     public int recordingFrameRate = 60;
+    [Tooltip("Also write a per-frame trajectory json beside each mp4, replayable with SwarmTrajectoryPlayer.")]
+    public bool captureTrajectories = true;
+    [Tooltip("Capture resolution. Raw frames are width x height x 4 bytes each and all of them pass through the encoder, so this and the frame rate dominate recording cost.")]
+    public int outputWidth = 1280;
+    public int outputHeight = 720;
     public string saveFolder = "SimulationRecordings";
 
     [Header("Recording Rules (per motion type)")]
     [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityTargetRatio = 0.25f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, densityTargetRatio = 0.25f },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityTargetRatio = 15f }
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, densityTargetRatio = 15f }
     };
 
     [Header("End Of Video Overlay")]
@@ -156,7 +163,7 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Text shown in the centre of the black card.")]
     public string videoFinishedText = "Video Finished";
     [Tooltip("How long the black card stays on screen. Appended after the motion, so total clip length is motion + this.")]
-    public float videoFinishedOverlayDuration = 0.5f;
+    public float videoFinishedOverlayDuration = 2.0f;
     [Tooltip("Font size of the centred text.")]
     public int videoFinishedFontSize = 72;
 
@@ -180,7 +187,7 @@ public class SimRecorder : MonoBehaviour
     public int swarmTypeParamIterations = 4;
 
     [Header("Combinations Batch")]
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Dispersion };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     public float[] combinationParam1Values = new float[] { 0.0f, 40.0f, 80.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
@@ -225,6 +232,10 @@ public class SimRecorder : MonoBehaviour
     private float lastOverlayDuration;
     private float lastStartDelay;
     private string lastWallsDisabled = "";
+    private string lastTrajectoryPath;
+
+    /// <summary>Path of the most recent trajectory file written, for the replay player's quick load.</summary>
+    public string LastTrajectoryPath => lastTrajectoryPath;
     private string lastDensityMetricName;
     private float lastDensityBaseline;
     private float lastDensityValue;
@@ -369,8 +380,16 @@ public class SimRecorder : MonoBehaviour
     /// area. The duration always acts as the upper bound. A "Video Finished" card is then held on
     /// screen (and captured into the clip) before the recorder is stopped.
     /// </summary>
-    private IEnumerator RunRecordingWindow()
+    private IEnumerator RunRecordingWindow(string outputFolder = null, string outputFileName = null)
     {
+        // Trajectory capture runs for exactly the recorded window, so the json lines up with the mp4.
+        SwarmTrajectoryRecorder trajectory = ResolveTrajectoryRecorder();
+        if (captureTrajectories && trajectory != null)
+        {
+            trajectory.StartCapture(outputFileName);
+            trajectory.SetRunContext(lastWallsDisabled);
+        }
+
         SwarmType swarmType = CurrentSwarmType;
         MotionTypeRecordingSettings settings = GetSettingsFor(swarmType);
         GoalArea goalArea = ResolveGoalArea();
@@ -453,6 +472,24 @@ public class SimRecorder : MonoBehaviour
             videoFinishedOverlayActive = false;
             lastOverlayDuration = overlayTimer;
         }
+
+        lastTrajectoryPath = null;
+        if (captureTrajectories && trajectory != null && trajectory.IsCapturing)
+        {
+            trajectory.SetOutcome(lastEndReason, lastEndConditionUsed.ToString(), lastDensityTargetRatio);
+
+            lastTrajectoryPath = string.IsNullOrEmpty(outputFolder)
+                ? trajectory.StopCaptureAndSaveToManualFolder(outputFileName)
+                : trajectory.StopCaptureAndSave(outputFolder, outputFileName);
+        }
+    }
+
+    /// <summary>The trajectory recorder in play, preferring the one the UI provisioned.</summary>
+    private SwarmTrajectoryRecorder ResolveTrajectoryRecorder()
+    {
+        if (uiController != null && uiController.trajectoryRecorder != null) return uiController.trajectoryRecorder;
+        if (swarmManager != null) return swarmManager.GetComponent<SwarmTrajectoryRecorder>();
+        return null;
     }
 
     /// <summary>The goal area currently in play, preferring the one UI.cs selected for the swarm type.</summary>
@@ -479,6 +516,18 @@ public class SimRecorder : MonoBehaviour
         config.densityAtEnd = lastDensityValue;
         config.densityRatioAtEnd = lastDensityRatio;
         config.densityTargetRatio = lastDensityTargetRatio;
+
+        if (uiController != null)
+        {
+            config.requestedAgents = uiController.RequestedAgentCount;
+            config.agentSpawnShortfall = uiController.AgentSpawnShortfall;
+
+            if (config.agentSpawnShortfall)
+            {
+                Debug.LogWarning($"[SimRecorder] '{config.fileName}' recorded with only " +
+                                 $"{config.numAgents} of {config.requestedAgents} agents.");
+            }
+        }
         config.goalAreaAgentPercentThreshold = lastEndConditionPercent;
         config.maxRecordingTime = lastMaxRecordingTime;
         config.agentsInsideGoalAreaAtEnd = lastAgentsInsideGoalArea;
@@ -677,8 +726,8 @@ public class SimRecorder : MonoBehaviour
 
         videoRecorder.ImageInputSettings = new GameViewInputSettings
         {
-            OutputWidth = 1920,
-            OutputHeight = 1080
+            OutputWidth = outputWidth,
+            OutputHeight = outputHeight
         };
 
         videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -693,7 +742,7 @@ public class SimRecorder : MonoBehaviour
         Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-        yield return RunRecordingWindow();
+        yield return RunRecordingWindow(currentFolderPath, fileName);
 
 #if UNITY_EDITOR
         recorderController.StopRecording();
@@ -885,8 +934,8 @@ public class SimRecorder : MonoBehaviour
 
                         videoRecorder.ImageInputSettings = new GameViewInputSettings
                         {
-                            OutputWidth = 1920,
-                            OutputHeight = 1080
+                            OutputWidth = outputWidth,
+                            OutputHeight = outputHeight
                         };
 
                         videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -901,7 +950,7 @@ public class SimRecorder : MonoBehaviour
                         Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                        yield return RunRecordingWindow();
+                        yield return RunRecordingWindow(targetFolderPath, fileName);
                         ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -1030,8 +1079,8 @@ public class SimRecorder : MonoBehaviour
 
             videoRecorder.ImageInputSettings = new GameViewInputSettings
             {
-                OutputWidth = 1920,
-                OutputHeight = 1080
+                OutputWidth = outputWidth,
+                OutputHeight = outputHeight
             };
 
             videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -1046,7 +1095,7 @@ public class SimRecorder : MonoBehaviour
             Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-            yield return RunRecordingWindow();
+            yield return RunRecordingWindow(targetFolderPath, fileName);
             ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -1186,8 +1235,8 @@ public class SimRecorder : MonoBehaviour
 
                 videoRecorder.ImageInputSettings = new GameViewInputSettings
                 {
-                    OutputWidth = 1920,
-                    OutputHeight = 1080
+                    OutputWidth = outputWidth,
+                    OutputHeight = outputHeight
                 };
 
                 videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -1202,7 +1251,7 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                yield return RunRecordingWindow();
+                yield return RunRecordingWindow(targetFolderPath, fileName);
                 ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -1349,8 +1398,8 @@ public class SimRecorder : MonoBehaviour
 
                 videoRecorder.ImageInputSettings = new GameViewInputSettings
                 {
-                    OutputWidth = 1920,
-                    OutputHeight = 1080
+                    OutputWidth = outputWidth,
+                    OutputHeight = outputHeight
                 };
 
                 videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -1365,7 +1414,7 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                yield return RunRecordingWindow();
+                yield return RunRecordingWindow(targetFolderPath, fileName);
                 ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -1526,8 +1575,8 @@ public class SimRecorder : MonoBehaviour
 
                 videoRecorder.ImageInputSettings = new GameViewInputSettings
                 {
-                    OutputWidth = 1920,
-                    OutputHeight = 1080
+                    OutputWidth = outputWidth,
+                    OutputHeight = outputHeight
                 };
 
                 videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -1542,7 +1591,7 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                yield return RunRecordingWindow();
+                yield return RunRecordingWindow(targetFolderPath, fileName);
                 ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -1687,8 +1736,8 @@ public class SimRecorder : MonoBehaviour
 
                 videoRecorder.ImageInputSettings = new GameViewInputSettings
                 {
-                    OutputWidth = 1920,
-                    OutputHeight = 1080
+                    OutputWidth = outputWidth,
+                    OutputHeight = outputHeight
                 };
 
                 videoRecorder.AudioInputSettings.PreserveAudio = false;
@@ -1703,7 +1752,7 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                yield return RunRecordingWindow();
+                yield return RunRecordingWindow(targetFolderPath, fileName);
                 ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR

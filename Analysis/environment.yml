@@ -1,0 +1,12 @@
+# Conda environment for the analysis notebooks and scripts.
+#   conda env update -n PythonAnalysis -f environment.yml
+name: PythonAnalysis
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - matplotlib
+  - pandas
+  - scipy        # validate_hull.py only
+  - ipykernel    # required for VS Code to offer this env as a notebook kernel

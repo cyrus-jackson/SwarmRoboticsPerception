@@ -10,6 +10,9 @@ public class SwarmAgent : MonoBehaviour
     // the integration step does not change the noise magnitude per unit time.
     private Vector2 randomMovementDirection;
 
+    /// <summary>Current velocity, exposed so trajectory capture can record it.</summary>
+    public Vector2 Velocity => currentVelocity;
+
     /// <summary>
     /// Draws a new random movement vector. Called once per rendered frame by SwarmManager,
     /// before that frame's integration substeps.

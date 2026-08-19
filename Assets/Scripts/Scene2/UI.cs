@@ -54,6 +54,10 @@ public class UI : MonoBehaviour
     [Tooltip("The common fate specifically for Flocking type")]
     public Transform flockingCommonFate;
 
+    [Header("Trajectory Capture")]
+    [Tooltip("Records every agent's pose and velocity per frame for replay. Added to the SwarmManager object automatically if left empty.")]
+    public SwarmTrajectoryRecorder trajectoryRecorder;
+
     [Header("Density Rule")]
     [Tooltip("Density monitor used by the density end condition. Added to the SwarmManager object automatically if left empty.")]
     public SwarmDensityMonitor densityMonitor;
@@ -139,6 +143,26 @@ public class UI : MonoBehaviour
 
         densityMonitor.swarmManager = swarmManager;
         swarmManager.densityMonitor = densityMonitor;
+
+        EnsureTrajectoryRecorder();
+    }
+
+    /// <summary>Finds or adds the trajectory recorder alongside the SwarmManager and links it up.</summary>
+    private void EnsureTrajectoryRecorder()
+    {
+        if (swarmManager == null) return;
+
+        if (trajectoryRecorder == null)
+        {
+            trajectoryRecorder = swarmManager.GetComponent<SwarmTrajectoryRecorder>();
+            if (trajectoryRecorder == null)
+            {
+                trajectoryRecorder = swarmManager.gameObject.AddComponent<SwarmTrajectoryRecorder>();
+            }
+        }
+
+        trajectoryRecorder.swarmManager = swarmManager;
+        trajectoryRecorder.uiController = this;
     }
 
     /// <summary>Adds the children of wallsRoot to the wall list, skipping duplicates.</summary>
@@ -154,6 +178,30 @@ public class UI : MonoBehaviour
             {
                 walls.Add(child);
             }
+        }
+    }
+
+    /// <summary>
+    /// Re-applies the panel's settings to the swarm manager. Used by the replay player to put the
+    /// live goal area and parameters back after it has borrowed the scene.
+    /// </summary>
+    public void ApplySettingsToManager()
+    {
+        UpdateSwarmManager();
+    }
+
+    /// <summary>
+    /// Shows the goal area belonging to a given motion type without changing the live selection,
+    /// so a replay can present the scene the recording was made in.
+    /// </summary>
+    public void ShowGoalAreaForType(SwarmType type)
+    {
+        Transform wanted = GetGoalAreaTransformForType(type);
+
+        Transform[] allGoalAreas = { flockingGoalArea, densificationGoalArea, randomGoalArea, dispersionGoalArea };
+        foreach (Transform area in allGoalAreas)
+        {
+            if (area != null) area.gameObject.SetActive(area == wanted);
         }
     }
 
@@ -214,6 +262,9 @@ public class UI : MonoBehaviour
     {
         if (Keyboard.current == null) return;
 
+        // While the replay player has the scene, X and Space belong to it.
+        if (IsReplayActive) return;
+
         if (Keyboard.current.xKey.wasPressedThisFrame)
         {
             showUI = !showUI;
@@ -224,6 +275,18 @@ public class UI : MonoBehaviour
             ToggleMotion();
         }
     }
+
+    /// <summary>True while the replay player is driving the scene.</summary>
+    private bool IsReplayActive
+    {
+        get
+        {
+            if (replayPlayer == null) replayPlayer = GetComponent<SwarmTrajectoryPlayer>();
+            return replayPlayer != null && replayPlayer.IsReplaying;
+        }
+    }
+
+    private SwarmTrajectoryPlayer replayPlayer;
 
     void ApplyPreset(SwarmType type)
     {
@@ -269,7 +332,7 @@ public class UI : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showUI) return;
+        if (!showUI || IsReplayActive) return;
 
         if (bgTexture == null)
         {
@@ -327,6 +390,7 @@ public class UI : MonoBehaviour
         GUILayout.Label("<b>Swarm Parameters</b>");
 
         uiNumberOfAgents = DrawSlider("Agents", uiNumberOfAgents, 4, 200, true);
+        DrawSpawnCountReadout();
         uiNeighbourSpread = DrawSlider("Neighbour Spread", uiNeighbourSpread, 0.1f, 5.0f);
         uiCohesion = DrawSlider("Cohesion", uiCohesion, 0, 10);
         uiSeparation = DrawSlider("Separation", uiSeparation, 0, 10);
@@ -495,6 +559,27 @@ public class UI : MonoBehaviour
     }
 
     /// <summary>
+    /// Shows how many agents were actually placed against how many were asked for, flagged in red
+    /// when the spawn routine came up short.
+    /// </summary>
+    private void DrawSpawnCountReadout()
+    {
+        int spawned = SpawnedAgentCount;
+
+        GUIStyle style = new GUIStyle(GUI.skin.label) { richText = true };
+        if (AgentSpawnShortfall)
+        {
+            style.normal.textColor = new Color(0.65f, 0.1f, 0.1f);
+            GUILayout.Label($"<b>Spawned {spawned} / {uiNumberOfAgents}</b>  ({uiNumberOfAgents - spawned} short)", style);
+            GUILayout.Label("Spawn area too small, safety distance too large, or obstacle clearance blocking.", style);
+        }
+        else
+        {
+            GUILayout.Label($"Spawned {spawned} / {uiNumberOfAgents}", style);
+        }
+    }
+
+    /// <summary>
     /// Toggle for the black "Video Finished" card the recorder appends to every clip. Reads and
     /// writes the recorder's own field so the panel and the Inspector never disagree.
     /// </summary>
@@ -569,6 +654,15 @@ public class UI : MonoBehaviour
 
     /// <summary>The motion type currently selected in the scene.</summary>
     public SwarmType SelectedSwarmType => selectedSwarmType;
+
+    /// <summary>How many agents were asked for.</summary>
+    public int RequestedAgentCount => uiNumberOfAgents;
+
+    /// <summary>How many agents the spawn routine actually managed to place.</summary>
+    public int SpawnedAgentCount => activeAgents != null ? activeAgents.Count : 0;
+
+    /// <summary>True when the last reset produced fewer agents than requested.</summary>
+    public bool AgentSpawnShortfall => SpawnedAgentCount < RequestedAgentCount;
 
     public void SetParameter(SwarmParameterToRecord param, float value)
     {
@@ -1046,6 +1140,27 @@ public class UI : MonoBehaviour
                 stepY = searchSide > 1 ? size.y / (searchSide - 1) : 0;
                 attempts++;
             }
+        }
+
+        // Stable, unique names so trajectory recordings can identify each agent across frames.
+        for (int i = 0; i < activeAgents.Count; i++)
+        {
+            if (activeAgents[i] != null) activeAgents[i].name = $"Agent_{i:D3}";
+        }
+
+        // Every spawn routine gives up after a capped number of attempts, so it can quietly
+        // produce fewer agents than asked for. Say so rather than letting a run proceed short.
+        if (activeAgents.Count < uiNumberOfAgents)
+        {
+            Debug.LogWarning($"UI: {selectedSwarmType} spawned only {activeAgents.Count} of " +
+                             $"{uiNumberOfAgents} agents using {selectedSpawnType} placement. " +
+                             $"The spawn area may be too small for the safety distance " +
+                             $"({uiSafetyDist:F2}), or the obstacle clearance ({uiObstacleRad:F2}) " +
+                             $"may be blocking positions.");
+        }
+        else
+        {
+            Debug.Log($"UI: {selectedSwarmType} spawned {activeAgents.Count} agents ({selectedSpawnType}).");
         }
 
         if (swarmManager != null)
