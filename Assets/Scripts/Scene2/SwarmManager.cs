@@ -43,10 +43,61 @@ public class SwarmManager : MonoBehaviour
     [Header("Integration")]
     [Tooltip("Fixed simulation step in seconds. Each frame's elapsed time is consumed in steps of this size using the paper's Euler update, so behaviour no longer depends on frame rate and fast agents cannot step over an obstacle in one go.")]
     public float simulationStep = 1f / 120f;
-    [Tooltip("Maximum substeps per frame. Prevents a stall if the editor hitches; any leftover time is dropped.")]
-    public int maxSubstepsPerFrame = 16;
+    [Tooltip("Maximum substeps per frame. Kept low on purpose: a slow frame produces a large deltaTime, which would ask for more substeps and make the next frame slower still. Leftover time is dropped instead.")]
+    public int maxSubstepsPerFrame = 3;
 
     private float stepAccumulator = 0f;
+
+    // Component lookups for the neighbour loop, resolved once per scene reset rather than per
+    // agent pair per substep. With 40 agents at 1/120 s that loop was making roughly 375,000
+    // GetComponent calls a second, which is what made long batches unrecoverable.
+    private Collider2D[] agentColliders = new Collider2D[0];
+    private SwarmAgent[] agentScripts = new SwarmAgent[0];
+
+    private Collider2D cachedObstacleCollider;
+    private Transform cachedObstacleTransform;
+
+    /// <summary>
+    /// Collider of the active central obstacle, resolved on demand and re-resolved when the
+    /// obstacle changes. Previously looked up once per agent per substep.
+    /// </summary>
+    public Collider2D ObstacleCollider
+    {
+        get
+        {
+            if (centralObstacle != cachedObstacleTransform)
+            {
+                cachedObstacleTransform = centralObstacle;
+                cachedObstacleCollider = centralObstacle != null
+                    ? centralObstacle.GetComponent<Collider2D>()
+                    : null;
+            }
+            return cachedObstacleCollider;
+        }
+    }
+
+    /// <summary>Colliders of the agents array, index aligned. May contain nulls.</summary>
+    public Collider2D[] AgentColliders => agentColliders;
+
+    /// <summary>SwarmAgent components of the agents array, index aligned. May contain nulls.</summary>
+    public SwarmAgent[] AgentScripts => agentScripts;
+
+    /// <summary>
+    /// Re-resolves the per-agent component cache. Call after assigning a new agents array.
+    /// </summary>
+    public void RebuildAgentCache()
+    {
+        int count = agents != null ? agents.Length : 0;
+        agentColliders = new Collider2D[count];
+        agentScripts = new SwarmAgent[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            if (agents[i] == null) continue;
+            agentColliders[i] = agents[i].GetComponent<Collider2D>();
+            agentScripts[i] = agents[i].GetComponent<SwarmAgent>();
+        }
+    }
 
     void Start()
     {
@@ -108,12 +159,13 @@ public class SwarmManager : MonoBehaviour
         float step = Mathf.Max(0.0001f, simulationStep);
         int stepCap = Mathf.Max(1, maxSubstepsPerFrame);
 
-        foreach (GameObject agentObj in agents)
-        {
-            if (agentObj == null) continue;
+        // Safety net: if the agents array was replaced without a RebuildAgentCache call, the
+        // cached lookups would be stale or short.
+        if (agentColliders.Length != agents.Length) RebuildAgentCache();
 
-            SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
-            if (agent != null) agent.SampleRandomMovement();
+        for (int i = 0; i < agentScripts.Length; i++)
+        {
+            if (agentScripts[i] != null) agentScripts[i].SampleRandomMovement();
         }
 
         stepAccumulator += Time.deltaTime;
@@ -121,12 +173,9 @@ public class SwarmManager : MonoBehaviour
         int stepsTaken = 0;
         while (stepAccumulator >= step && stepsTaken < stepCap)
         {
-            foreach (GameObject agentObj in agents)
+            for (int i = 0; i < agentScripts.Length; i++)
             {
-                if (agentObj == null) continue;
-
-                SwarmAgent agent = agentObj.GetComponent<SwarmAgent>();
-                if (agent != null) agent.UpdateAgent(this, step);
+                if (agentScripts[i] != null) agentScripts[i].UpdateAgent(this, step);
             }
 
             stepAccumulator -= step;

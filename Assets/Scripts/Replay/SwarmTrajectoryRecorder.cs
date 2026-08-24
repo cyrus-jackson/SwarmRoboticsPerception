@@ -146,11 +146,17 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
     }
 
     /// <summary>
-    /// Adds context known only to the caller: which walls the motion type had disabled.
+    /// Adds context known only to the caller: which walls the motion type had disabled, and the
+    /// fixed starting layout if the run used one.
     /// </summary>
-    public void SetRunContext(string wallsDisabled)
+    public void SetRunContext(string wallsDisabled, string spawnLayoutId = null,
+                              string spawnLayoutFingerprint = null)
     {
-        if (working != null) working.header.wallsDisabled = wallsDisabled;
+        if (working == null) return;
+
+        working.header.wallsDisabled = wallsDisabled;
+        working.header.spawnLayoutId = spawnLayoutId;
+        working.header.spawnLayoutFingerprint = spawnLayoutFingerprint;
     }
 
     /// <summary>

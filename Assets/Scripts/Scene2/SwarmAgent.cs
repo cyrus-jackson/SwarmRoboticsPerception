@@ -37,8 +37,15 @@ public class SwarmAgent : MonoBehaviour
         Vector2 overlappingAvoidanceSum = Vector2.zero;
         int neighborCount = 0;
 
-        foreach (GameObject otherObj in manager.agents)
+        // Indexed rather than foreach, so the cached component arrays on the manager can be used.
+        // Looking these up per pair per substep was the single most expensive thing in the sim.
+        GameObject[] others = manager.agents;
+        Collider2D[] otherColliders = manager.AgentColliders;
+        SwarmAgent[] otherAgents = manager.AgentScripts;
+
+        for (int i = 0; i < others.Length; i++)
         {
+            GameObject otherObj = others[i];
             if (otherObj != gameObject && otherObj != null)
             {
                 Vector2 otherPos = otherObj.transform.position;
@@ -46,7 +53,7 @@ public class SwarmAgent : MonoBehaviour
 
                 // Calculate distance to the edge of the other agent (using its collider if available)
                 float perceptionDistance = centerDistance;
-                Collider2D otherCollider = otherObj.GetComponent<Collider2D>();
+                Collider2D otherCollider = i < otherColliders.Length ? otherColliders[i] : null;
                 if (otherCollider != null)
                 {
                     perceptionDistance = Vector2.Distance(currentPosition, otherCollider.ClosestPoint(currentPosition));
@@ -57,7 +64,7 @@ public class SwarmAgent : MonoBehaviour
                     cohesionSum += otherPos;
                     separationSum += (currentPosition - otherPos).normalized;
 
-                    SwarmAgent otherAgent = otherObj.GetComponent<SwarmAgent>();
+                    SwarmAgent otherAgent = i < otherAgents.Length ? otherAgents[i] : null;
                     if (otherAgent != null)
                     {
                         alignmentSum += otherAgent.currentVelocity;
@@ -117,7 +124,7 @@ public class SwarmAgent : MonoBehaviour
         // Environmental Obstacle Avoidance (Repulsive potential field)
         if (manager.centralObstacle != null)
         {
-            Collider2D obstacleCollider = manager.centralObstacle.GetComponent<Collider2D>();
+            Collider2D obstacleCollider = manager.ObstacleCollider;
             if (obstacleCollider != null)
             {
                 Vector2 closest = obstacleCollider.ClosestPoint(currentPosition);

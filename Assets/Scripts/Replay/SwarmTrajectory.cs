@@ -262,6 +262,10 @@ public class TrajectoryHeader
     public float contactDistance;    // agent radius plus skin, the threshold used
     public float agentRadius;        // radius the threshold was derived from
 
+    // Fixed starting layout, when the run used one.
+    public string spawnLayoutId;
+    public string spawnLayoutFingerprint;
+
     // Hull area capture.
     public bool hullAreaRecorded;    // false for recordings made before area was captured
     public float hullTrimFraction;   // fraction of outermost agents dropped before hulling

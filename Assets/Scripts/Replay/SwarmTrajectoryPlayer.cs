@@ -12,6 +12,35 @@ using UnityEngine.InputSystem;
 /// replay agents is driven straight from the file. Poses are read, never simulated, so scrubbing
 /// backwards costs exactly what scrubbing forwards does. Leaving replay restores everything.
 /// </summary>
+/// <summary>How the reference dispersion is drawn in the scene.</summary>
+public enum ReferenceOutlineMode
+{
+    /// <summary>
+    /// The reference's own trimmed hull at its plateau frame, in world space. The reference began
+    /// from the identical spawn layout, so this is directly comparable: where the replayed hull
+    /// covers it, the swarm has genuinely spread that far in that direction.
+    /// </summary>
+    RecordedHull,
+
+    /// <summary>
+    /// The same outline translated onto the replayed swarm's centroid, which removes the drift
+    /// between the two runs and leaves a pure size and shape comparison.
+    /// </summary>
+    CentredOnSwarm,
+
+    /// <summary>
+    /// A circle of the same area as the reference plateau. An area gauge only.
+    ///
+    /// Do not read it as a shape to match. By the isoperimetric inequality a circle is the most
+    /// compact shape enclosing a given area, so a hull of exactly equal area still extends beyond
+    /// the ring in some directions and falls inside it in others. Measured on this project's own
+    /// references at R 1.90, the hull reaches 1.10-1.22x the ring radius at its furthest vertex and
+    /// 0.84-0.95x at its nearest, with over half the vertices outside. "Touching the ring" is
+    /// therefore not the moment the areas match.
+    /// </summary>
+    EqualAreaCircle,
+}
+
 [RequireComponent(typeof(UI))]
 public class SwarmTrajectoryPlayer : MonoBehaviour
 {
@@ -53,6 +82,24 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     public Color hullColor = new Color(0.15f, 0.75f, 1f, 1f);
     public Color baselineHullColor = new Color(0.15f, 0.75f, 1f, 0.3f);
     public float hullLineWidth = 0.05f;
+
+    [Header("Reference dispersion (the same layout, without randomness)")]
+    [Tooltip("When replaying a run that had random movement, look up the zero-randomness run recorded from the SAME spawn layout at the same perception radius and max speed, and show the hull area it settled at. Gives the replay a target to be judged against.")]
+    public bool showReferenceHull = true;
+
+    [Tooltip("Folder of recordings to take reference runs from, relative to the project root. Scanned recursively; only the zero-randomness runs are indexed.")]
+    public string referenceHullFolder = "Assets/SimulationRecordings/MatchedStart_PerceptionRad";
+
+    [Tooltip("Seconds the replayed hull must stay at or past the reference area before it counts as reached, matching the dwell the recorder applies.")]
+    public float referenceDwellTime = 0.5f;
+
+    [Tooltip("RecordedHull: the reference's actual hull at its plateau, where it actually was. CentredOnSwarm: that same outline slid onto the replayed swarm, for size and shape only. EqualAreaCircle: a ring of the same area — area only, and NOT a shape the swarm should match.")]
+    public ReferenceOutlineMode referenceOutline_Mode = ReferenceOutlineMode.RecordedHull;
+
+    [Tooltip("Rebuild the index instead of reusing reference_hull_index.json in the folder. Turn on after re-recording references.")]
+    public bool rebuildReferenceIndex = false;
+
+    public Color referenceHullColor = new Color(1f, 0.78f, 0.25f, 0.85f);
     [Range(0f, 0.5f)] public float hullTrimFraction = 0.1f;
 
     [Header("Trails")]
@@ -77,6 +124,20 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     private readonly List<Vector2> baselineHull = new List<Vector2>();
     private float currentHullArea;
     private float baselineHullArea;
+
+    // Reference dispersion for the run on screen: the area its no-randomness twin settled at.
+    private ReferenceHullIndex referenceIndex;
+    private ReferenceHullIndex.Entry referenceEntry;
+    private LineRenderer referenceHullLine;
+    private readonly List<Vector2> referenceOutline = new List<Vector2>();
+
+    // The reference's hull at its plateau, in the coordinates it was recorded in. Read once when a
+    // recording is loaded; the outline is small even though the file it came from is not.
+    private readonly List<Vector2> referenceHullAtPlateau = new List<Vector2>();
+    private Vector2 referenceHullCentre;
+    private string referenceStatus = "";
+    private int referenceCrossFrame = -1;
+    private float referenceCrossTime;
 
     private bool isPlaying;
     private float playhead;
@@ -310,6 +371,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         BuildAgents();
         ApplyRecordedSceneState();
         ComputeBaselineHull();
+        ResolveReferenceDispersion();
 
         playhead = 0f;
         currentFrame = 0;
@@ -391,8 +453,10 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         if (hullLine != null) Destroy(hullLine.gameObject);
         if (baselineHullLine != null) Destroy(baselineHullLine.gameObject);
+        if (referenceHullLine != null) Destroy(referenceHullLine.gameObject);
         hullLine = null;
         baselineHullLine = null;
+        referenceHullLine = null;
     }
 
     /// <summary>Removes anything that would move or collide, so the replay is purely the data.</summary>
@@ -437,6 +501,14 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
             go.transform.SetParent(transform, false);
             baselineHullLine = go.AddComponent<LineRenderer>();
             ConfigureLine(baselineHullLine, baselineHullColor, hullLineWidth, true);
+        }
+
+        if (referenceHullLine == null)
+        {
+            GameObject go = new GameObject("ReplayHullReference");
+            go.transform.SetParent(transform, false);
+            referenceHullLine = go.AddComponent<LineRenderer>();
+            ConfigureLine(referenceHullLine, referenceHullColor, hullLineWidth, true);
         }
     }
 
@@ -542,10 +614,233 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     private void UpdateHull()
     {
         currentHullArea = SwarmDensityMetrics.TrimmedHull(positionBuffer, hullTrimFraction, hullBuffer, null);
+        UpdateReferenceOutline();
 
         EnsureHullRenderers();
         DrawPolygon(hullLine, showHull ? hullBuffer : null, hullColor);
         DrawPolygon(baselineHullLine, showHull ? baselineHull : null, baselineHullColor);
+        DrawPolygon(referenceHullLine,
+                    showHull && showReferenceHull ? referenceOutline : null, referenceHullColor);
+    }
+
+    /// <summary>
+    /// Finds the dispersion this run would have reached without randomness, and when it got there.
+    ///
+    /// The run on screen started from a saved spawn layout. Somewhere in the recordings folder is
+    /// the run that began from that identical layout at the same perception radius and max speed
+    /// with random movement switched off. That run's plateau hull area is the honest comparison
+    /// point: it is how far this particular arrangement of agents spreads under separation alone,
+    /// with spawn luck held fixed rather than averaged away.
+    ///
+    /// Only meaningful for a randomised run. A reference is its own answer, so it is left alone.
+    /// </summary>
+    private void ResolveReferenceDispersion()
+    {
+        referenceEntry = null;
+        referenceOutline.Clear();
+        referenceHullAtPlateau.Clear();
+        referenceCrossFrame = -1;
+        referenceCrossTime = 0f;
+        referenceStatus = "";
+
+        if (!showReferenceHull || trajectory == null) return;
+
+        TrajectoryHeader h = trajectory.header;
+
+        if (Mathf.Abs(h.randomMovement) <= 0.001f)
+        {
+            referenceStatus = "this run IS the reference";
+            return;
+        }
+
+        if (string.IsNullOrEmpty(h.spawnLayoutId))
+        {
+            referenceStatus = "no spawn layout recorded, nothing to match";
+            return;
+        }
+
+        ReferenceHullIndex index = EnsureReferenceIndex();
+        if (index == null || index.Count == 0)
+        {
+            referenceStatus = "no reference recordings indexed";
+            return;
+        }
+
+        if (!index.TryGet(h.spawnLayoutId, h.perceptionRadius, h.maxSpeed,
+                          out ReferenceHullIndex.Entry entry))
+        {
+            referenceStatus = $"none for R {h.perceptionRadius:F2}, maxSpeed {h.maxSpeed:F2}";
+            return;
+        }
+
+        referenceEntry = entry;
+        LoadReferenceHullOutline();
+        FindReferenceCrossing();
+
+        if (!entry.HasDirection)
+        {
+            referenceStatus = $"reference barely moved ({entry.Growth:F2}x its spawn area), " +
+                              "so this target is inside the noise of where it started";
+        }
+        else if (!entry.settled)
+        {
+            referenceStatus = "reference never settled, area is a lower bound";
+        }
+    }
+
+    /// <summary>
+    /// The first frame at which the replayed hull holds at or past the reference area for the dwell
+    /// time. Mirrors the rule the recorder applies, so the marker lands where a clip using this
+    /// target would actually have ended.
+    /// </summary>
+    private void FindReferenceCrossing()
+    {
+        referenceCrossFrame = -1;
+        if (referenceEntry == null || trajectory == null || trajectory.FrameCount == 0) return;
+
+        float target = referenceEntry.plateauArea;
+        if (target <= 0f) return;
+
+        // Direction is a property of the reference, not of this run's own frame 0. Comparing the
+        // target against the replayed run's start flips the test to a contraction check whenever
+        // the target lands inside the spread of starting areas, which scored eight of these
+        // recordings as "never reached" while they were expanding tenfold.
+        bool growing = referenceEntry.Growing;
+
+        int heldFrom = -1;
+
+        for (int f = 0; f < trajectory.FrameCount; f++)
+        {
+            float area = AreaAtFrame(f);
+            bool met = growing ? area >= target : area <= target;
+
+            if (!met) { heldFrom = -1; continue; }
+            if (heldFrom < 0) heldFrom = f;
+
+            if (trajectory.frames[f].t - trajectory.frames[heldFrom].t >= Mathf.Max(0f, referenceDwellTime))
+            {
+                referenceCrossFrame = f;
+                referenceCrossTime = trajectory.frames[f].t;
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hull area on a frame, preferring the value Unity recorded at capture time so the replay
+    /// reports the number the recorder was deciding on. Older files without it are recomputed.
+    /// </summary>
+    private float AreaAtFrame(int frame)
+    {
+        if (trajectory.HasHullArea) return trajectory.GetHullArea(frame);
+
+        List<Vector2> points = new List<Vector2>(trajectory.AgentCount);
+        for (int i = 0; i < trajectory.AgentCount; i++) points.Add(trajectory.GetPosition(frame, i));
+        return SwarmDensityMetrics.TrimmedHullArea(points, hullTrimFraction);
+    }
+
+    private ReferenceHullIndex EnsureReferenceIndex()
+    {
+        if (referenceIndex != null && !rebuildReferenceIndex) return referenceIndex;
+
+        referenceIndex = ReferenceHullIndex.Build(ResolveProjectPath(referenceHullFolder),
+                                                  useCache: !rebuildReferenceIndex);
+        rebuildReferenceIndex = false;
+        return referenceIndex;
+    }
+
+    /// <summary>
+    /// Project-relative path to absolute. Application.dataPath already ends in "Assets", so a path
+    /// beginning "Assets/" would otherwise resolve to "Assets/Assets/...".
+    /// </summary>
+    private static string ResolveProjectPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+
+        string trimmed = path.Trim().Replace('\\', '/').TrimEnd('/');
+        if (Path.IsPathRooted(trimmed)) return trimmed;
+        if (trimmed.Equals("Assets", System.StringComparison.OrdinalIgnoreCase)) return Application.dataPath;
+        if (trimmed.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase)) trimmed = trimmed.Substring(7);
+
+        return Path.Combine(Application.dataPath, trimmed);
+    }
+
+    /// <summary>
+    /// Reads the reference's own hull at its plateau, so the scene can show the actual shape the
+    /// swarm settled into rather than a stand-in for its area.
+    ///
+    /// Loading the whole reference recording for one frame is heavy, but it happens once when a
+    /// recording is opened, and only the resulting outline is kept.
+    /// </summary>
+    private void LoadReferenceHullOutline()
+    {
+        referenceHullAtPlateau.Clear();
+        referenceHullCentre = Vector2.zero;
+
+        if (referenceEntry == null || string.IsNullOrEmpty(referenceEntry.sourcePath)) return;
+        if (!File.Exists(referenceEntry.sourcePath)) return;
+
+        SwarmTrajectory reference = SwarmTrajectory.Load(referenceEntry.sourcePath);
+        if (reference == null || reference.FrameCount == 0) return;
+
+        int frame = Mathf.Clamp(referenceEntry.plateauFrame, 0, reference.FrameCount - 1);
+
+        List<Vector2> points = new List<Vector2>(reference.AgentCount);
+        for (int i = 0; i < reference.AgentCount; i++) points.Add(reference.GetPosition(frame, i));
+
+        SwarmDensityMetrics.TrimmedHull(points, hullTrimFraction, referenceHullAtPlateau, null);
+
+        for (int i = 0; i < referenceHullAtPlateau.Count; i++) referenceHullCentre += referenceHullAtPlateau[i];
+        if (referenceHullAtPlateau.Count > 0) referenceHullCentre /= referenceHullAtPlateau.Count;
+    }
+
+    /// <summary>Builds the outline drawn in the scene, per the chosen mode.</summary>
+    private void UpdateReferenceOutline()
+    {
+        referenceOutline.Clear();
+
+        if (referenceEntry == null || referenceEntry.plateauArea <= 0f) return;
+
+        if (referenceOutline_Mode != ReferenceOutlineMode.EqualAreaCircle &&
+            referenceHullAtPlateau.Count >= 3)
+        {
+            if (referenceOutline_Mode == ReferenceOutlineMode.RecordedHull)
+            {
+                referenceOutline.AddRange(referenceHullAtPlateau);
+                return;
+            }
+
+            // CentredOnSwarm: same polygon, slid onto the replayed swarm so the drift between the
+            // two runs does not muddle a comparison that is only about size and shape.
+            Vector2 offset = SwarmCentroid() - referenceHullCentre;
+            for (int i = 0; i < referenceHullAtPlateau.Count; i++)
+            {
+                referenceOutline.Add(referenceHullAtPlateau[i] + offset);
+            }
+            return;
+        }
+
+        // Area-only fallback. See ReferenceOutlineMode.EqualAreaCircle: this is not a shape to match.
+        if (positionBuffer.Count == 0) return;
+
+        float radius = Mathf.Sqrt(referenceEntry.plateauArea / Mathf.PI);
+        Vector2 centre = SwarmCentroid();
+        const int segments = 64;
+
+        for (int i = 0; i < segments; i++)
+        {
+            float a = (i / (float)segments) * Mathf.PI * 2f;
+            referenceOutline.Add(centre + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * radius);
+        }
+    }
+
+    private Vector2 SwarmCentroid()
+    {
+        if (positionBuffer.Count == 0) return Vector2.zero;
+
+        Vector2 centre = Vector2.zero;
+        for (int i = 0; i < positionBuffer.Count; i++) centre += positionBuffer[i];
+        return centre / positionBuffer.Count;
     }
 
     private void ComputeBaselineHull()
@@ -886,6 +1181,85 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
             Row("Mean degree", $"{degree:F1}   crit 4.51");
             Row("State", connected ? "connected" : "fragmenting", connected ? Accent : Warn);
             Row("Area / A_c", $"{(currentHullArea / criticalArea):F2}x   A_c {criticalArea:F1}");
+        }
+
+        DrawReferenceDispersion();
+    }
+
+    /// <summary>
+    /// How this run compares with the same layout run without randomness.
+    ///
+    /// Everything here is paired: the reference began from the identical spawn, so the ratio is a
+    /// within-layout number with spawn luck divided out rather than averaged away.
+    /// </summary>
+    private void DrawReferenceDispersion()
+    {
+        if (!showReferenceHull) return;
+
+        Section("Vs. no randomness, same layout");
+
+        if (referenceEntry == null)
+        {
+            Row("Reference", string.IsNullOrEmpty(referenceStatus) ? "not resolved" : referenceStatus, Muted);
+            return;
+        }
+
+        Row("Target area", $"{referenceEntry.plateauArea:F2} u²",
+            referenceEntry.settled ? Accent : Warn);
+        Row("From layout", referenceEntry.layoutId, Muted);
+        Row("Settled at", referenceEntry.settled
+                ? $"{referenceEntry.plateauTime:F2} s into the reference"
+                : "never settled, lower bound",
+            referenceEntry.settled ? (Color?)null : Warn);
+
+        GUILayout.Space(4);
+
+        float share = referenceEntry.plateauArea > 0.0001f
+            ? currentHullArea / referenceEntry.plateauArea
+            : 0f;
+        Row("This frame", $"{share:F2}x the reference", share >= 1f ? Accent : Warn);
+
+        if (referenceCrossFrame >= 0)
+        {
+            bool passed = currentFrame >= referenceCrossFrame;
+            Row("Reaches it at", $"{referenceCrossTime:F2} s   frame {referenceCrossFrame}",
+                passed ? Accent : Muted);
+
+            if (!passed && GUILayout.Button("Jump to that frame", buttonStyle))
+            {
+                SeekToFrame(referenceCrossFrame);
+            }
+        }
+        else
+        {
+            Row("Reaches it at", $"never, in {trajectory.Duration:F2} s", Warn);
+        }
+
+        GUILayout.Space(4);
+
+        string drawn;
+        switch (referenceOutline_Mode)
+        {
+            case ReferenceOutlineMode.RecordedHull:
+                drawn = referenceHullAtPlateau.Count >= 3
+                    ? "the reference's own hull, where it was"
+                    : "outline unavailable, showing area ring";
+                break;
+            case ReferenceOutlineMode.CentredOnSwarm:
+                drawn = referenceHullAtPlateau.Count >= 3
+                    ? "reference hull, moved onto this swarm"
+                    : "outline unavailable, showing area ring";
+                break;
+            default:
+                drawn = "equal-area ring — size only, not a shape";
+                break;
+        }
+        Row("Gold outline", drawn, Muted);
+
+        if (!string.IsNullOrEmpty(referenceStatus))
+        {
+            GUILayout.Space(2);
+            Row("Note", referenceStatus, Warn);
         }
     }
 

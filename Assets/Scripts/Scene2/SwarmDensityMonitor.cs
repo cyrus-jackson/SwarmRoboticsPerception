@@ -149,6 +149,7 @@ public class SwarmDensityMonitor : MonoBehaviour
     public void ResetTracking()
     {
         Baseline = 0f;
+        BaselineHullArea = 0f;
         CurrentValue = 0f;
         HasBaseline = false;
         HasSampled = false;
@@ -171,6 +172,7 @@ public class SwarmDensityMonitor : MonoBehaviour
     public float CaptureBaseline(GameObject[] agents)
     {
         Baseline = Measure(agents);
+        BaselineHullArea = LastHullArea;
 
         // Freeze the outline as it was at baseline so the change is visible in the scene view.
         baselineHull.Clear();
@@ -282,6 +284,29 @@ public class SwarmDensityMonitor : MonoBehaviour
         }
 
         return area;
+    }
+
+    /// <summary>Trimmed hull area at the moment the baseline was captured.</summary>
+    public float BaselineHullArea { get; private set; }
+
+    /// <summary>
+    /// True once the trimmed hull area has reached an absolute target in world units. Whether that
+    /// means growing to it or shrinking to it is inferred from the area at recording start, the
+    /// same way the ratio test infers direction from 1.
+    ///
+    /// Used to end several conditions at the same degree of dispersion, so the endpoint is held
+    /// constant and only the manner of the motion differs between them.
+    /// </summary>
+    public bool IsHullAreaReached(float targetArea)
+    {
+        if (!HasSampled || targetArea <= 0f) return false;
+
+        // Without a baseline, assume the swarm is expanding toward the target.
+        if (BaselineHullArea <= 0.0001f) return LastHullArea >= targetArea;
+
+        return targetArea >= BaselineHullArea
+            ? LastHullArea >= targetArea
+            : LastHullArea <= targetArea;
     }
 
     /// <summary>

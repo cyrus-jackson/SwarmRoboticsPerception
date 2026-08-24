@@ -10,3 +10,4 @@ dependencies:
   - pandas
   - scipy        # validate_hull.py only
   - ipykernel    # required for VS Code to offer this env as a notebook kernel
+  - jinja2       # pandas .style tables in same_start.ipynb

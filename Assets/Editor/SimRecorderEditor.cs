@@ -5,9 +5,11 @@ using UnityEngine;
 [CustomEditor(typeof(SimRecorder))]
 public class SimRecorderEditor : Editor
 {
-    private static readonly string[] EndConditionLabels = { "Fixed Duration", "Target Area Reached", "Density Ratio Reached" };
+    private static readonly string[] EndConditionLabels =
+        { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
+    private const int AbsoluteHullAreaIndex = 3;
 
     private SerializedProperty motionTypeSettingsProperty;
 
@@ -41,6 +43,8 @@ public class SimRecorderEditor : Editor
                 SerializedProperty percent = entry.FindPropertyRelative("goalAreaAgentPercent");
                 SerializedProperty densityMetric = entry.FindPropertyRelative("densityMetric");
                 SerializedProperty densityTargetRatio = entry.FindPropertyRelative("densityTargetRatio");
+                SerializedProperty absoluteArea = entry.FindPropertyRelative("absoluteHullAreaTarget");
+                SerializedProperty dwell = entry.FindPropertyRelative("endConditionDwellTime");
                 SerializedProperty overrideTime = entry.FindPropertyRelative("overrideRecordingTime");
 
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -62,6 +66,16 @@ public class SimRecorderEditor : Editor
                 {
                     EditorGUILayout.PropertyField(densityMetric, new GUIContent("Density Metric"));
                     EditorGUILayout.Slider(densityTargetRatio, 0.05f, 3f, new GUIContent("Target Ratio (<1 shrink)"));
+                }
+
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != AbsoluteHullAreaIndex))
+                {
+                    EditorGUILayout.PropertyField(absoluteArea, new GUIContent("Target Hull Area (u2)"));
+                }
+
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0))
+                {
+                    EditorGUILayout.PropertyField(dwell, new GUIContent("Dwell Before Ending (s)"));
                 }
 
                 EditorGUILayout.PropertyField(overrideTime, new GUIContent("Max Time Override (0 = global)"));

@@ -93,7 +93,7 @@ public class UI : MonoBehaviour
 
     // UI Configuration values
     private SwarmType selectedSwarmType = SwarmType.Densification;
-    private AgentSpawnType selectedSpawnType = AgentSpawnType.Grid;
+    private AgentSpawnType selectedSpawnType = AgentSpawnType.Random;
     private int selectedSpawnAreaIndex = 0;
     private int selectedCommonFateIndex = 0;
 
@@ -202,6 +202,116 @@ public class UI : MonoBehaviour
         foreach (Transform area in allGoalAreas)
         {
             if (area != null) area.gameObject.SetActive(area == wanted);
+        }
+    }
+
+    /// <summary>
+    /// Snapshots where the agents currently are, so later runs can start from the same
+    /// arrangement.
+    /// </summary>
+    public SpawnLayout CaptureSpawnLayout(string layoutId)
+    {
+        Transform area = GetActiveSpawnAreaForType(selectedSwarmType);
+
+        return SpawnLayout.FromAgents(
+            activeAgents,
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
+            selectedSwarmType.ToString(),
+            selectedSpawnType.ToString(),
+            area != null ? area.name : null,
+            layoutId);
+    }
+
+    /// <summary>
+    /// Rebuilds the swarm at exactly the positions in a saved layout, bypassing the random spawn
+    /// routine. Everything else about a reset still happens: obstacle placement, walls, goal area,
+    /// agent naming and the manager caches.
+    /// </summary>
+    public void SpawnFromLayout(SpawnLayout layout)
+    {
+        if (layout == null || layout.Count == 0)
+        {
+            Debug.LogError("UI: cannot spawn from an empty layout.");
+            return;
+        }
+
+        if (agentPrefab == null)
+        {
+            Debug.LogError("UI: no agent prefab assigned.");
+            return;
+        }
+
+        isRunning = false;
+        if (swarmManager != null) swarmManager.enabled = false;
+
+        SyncDefaultObstacleActiveState();
+        PlaceDefaultObstacleAtDefaultSpawnLocation();
+        EnableAllWalls();
+
+        foreach (var agent in activeAgents)
+        {
+            if (agent != null) Destroy(agent);
+        }
+        activeAgents.Clear();
+
+        for (int i = 0; i < layout.Count; i++)
+        {
+            Vector2 p = layout.GetPosition(i);
+            activeAgents.Add(Instantiate(agentPrefab, new Vector3(p.x, p.y, 0f), Quaternion.identity));
+        }
+
+        FinaliseSpawn($"layout {layout.layoutId}");
+    }
+
+    /// <summary>
+    /// Naming, warnings and manager wiring that must happen however the agents were placed.
+    /// Shared by the random spawn routine and by SpawnFromLayout.
+    /// </summary>
+    private void FinaliseSpawn(string source)
+    {
+        // Stable, unique names so trajectory recordings can identify each agent across frames.
+        for (int i = 0; i < activeAgents.Count; i++)
+        {
+            if (activeAgents[i] != null) activeAgents[i].name = $"Agent_{i:D3}";
+        }
+
+        if (activeAgents.Count < uiNumberOfAgents)
+        {
+            Debug.LogWarning($"UI: {selectedSwarmType} spawned only {activeAgents.Count} of " +
+                             $"{uiNumberOfAgents} agents from {source}. " +
+                             $"The spawn area may be too small for the safety distance " +
+                             $"({uiSafetyDist:F2}), or the obstacle clearance ({uiObstacleRad:F2}) " +
+                             $"may be blocking positions.");
+        }
+        else
+        {
+            Debug.Log($"UI: {selectedSwarmType} spawned {activeAgents.Count} agents ({source}).");
+        }
+
+        if (swarmManager != null)
+        {
+            swarmManager.agents = activeAgents.ToArray();
+            swarmManager.RebuildAgentCache();
+            swarmManager.ResetIntegration();
+            UpdateSwarmManager();
+
+            if (ActiveGoalArea != null) ActiveGoalArea.ResetTracking();
+            if (densityMonitor != null) densityMonitor.ResetTracking();
+        }
+    }
+
+    /// <summary>The spawn area a given motion type uses, for recording in a layout.</summary>
+    private Transform GetActiveSpawnAreaForType(SwarmType type)
+    {
+        switch (type)
+        {
+            case SwarmType.Dispersion: return circleSpawnArea;
+            case SwarmType.Densification: return densificationSpawnArea;
+            case SwarmType.Flocking: return flockingSpawnArea;
+            default:
+                if (spawnAreas != null && selectedSpawnAreaIndex < spawnAreas.Length)
+                    return spawnAreas[selectedSpawnAreaIndex];
+                return null;
         }
     }
 
@@ -471,6 +581,19 @@ public class UI : MonoBehaviour
                 recorder.uiController = this;
                 if (swarmManager != null) recorder.swarmManager = swarmManager;
                 recorder.StartCombinationsRecording();
+            }
+        }
+
+        if (GUILayout.Button("Batch Record Matched Start (same spawns)"))
+        {
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (recorder == null) recorder = gameObject.AddComponent<SimRecorder>();
+
+            if (recorder != null)
+            {
+                recorder.uiController = this;
+                if (swarmManager != null) recorder.swarmManager = swarmManager;
+                recorder.StartMatchedStartBatchRecording();
             }
         }
 
@@ -1142,45 +1265,9 @@ public class UI : MonoBehaviour
             }
         }
 
-        // Stable, unique names so trajectory recordings can identify each agent across frames.
-        for (int i = 0; i < activeAgents.Count; i++)
-        {
-            if (activeAgents[i] != null) activeAgents[i].name = $"Agent_{i:D3}";
-        }
-
         // Every spawn routine gives up after a capped number of attempts, so it can quietly
-        // produce fewer agents than asked for. Say so rather than letting a run proceed short.
-        if (activeAgents.Count < uiNumberOfAgents)
-        {
-            Debug.LogWarning($"UI: {selectedSwarmType} spawned only {activeAgents.Count} of " +
-                             $"{uiNumberOfAgents} agents using {selectedSpawnType} placement. " +
-                             $"The spawn area may be too small for the safety distance " +
-                             $"({uiSafetyDist:F2}), or the obstacle clearance ({uiObstacleRad:F2}) " +
-                             $"may be blocking positions.");
-        }
-        else
-        {
-            Debug.Log($"UI: {selectedSwarmType} spawned {activeAgents.Count} agents ({selectedSpawnType}).");
-        }
-
-        if (swarmManager != null)
-        {
-            swarmManager.agents = activeAgents.ToArray();
-            swarmManager.ResetIntegration();
-            UpdateSwarmManager(); // Apply parameters after reset
-
-            // Clear any count carried over from the previous run so it cannot
-            // immediately satisfy the goal-area end condition.
-            if (ActiveGoalArea != null)
-            {
-                ActiveGoalArea.ResetTracking();
-            }
-
-            if (densityMonitor != null)
-            {
-                densityMonitor.ResetTracking();
-            }
-        }
+        // produce fewer agents than asked for; FinaliseSpawn reports that.
+        FinaliseSpawn($"{selectedSpawnType} placement");
     }
 
     void OnDrawGizmos()
