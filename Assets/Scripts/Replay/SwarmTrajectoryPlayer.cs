@@ -87,8 +87,10 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     [Tooltip("When replaying a run that had random movement, look up the zero-randomness run recorded from the SAME spawn layout at the same perception radius and max speed, and show the hull area it settled at. Gives the replay a target to be judged against.")]
     public bool showReferenceHull = true;
 
-    [Tooltip("Folder of recordings to take reference runs from, relative to the project root. Scanned recursively; only the zero-randomness runs are indexed.")]
-    public string referenceHullFolder = "Assets/SimulationRecordings/MatchedStart_PerceptionRad";
+    // References are always taken from the folder the loaded recording sits in. There is
+    // deliberately no setting for this: a batch records its zero-randomness runs alongside its
+    // randomised ones, so the clip's own folder is the only correct place to look. A configurable
+    // path only created a second thing to get wrong, and pointed at a stale folder by default.
 
     [Tooltip("Seconds the replayed hull must stay at or past the reference area before it counts as reached, matching the dwell the recorder applies.")]
     public float referenceDwellTime = 0.5f;
@@ -127,6 +129,8 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
     // Reference dispersion for the run on screen: the area its no-randomness twin settled at.
     private ReferenceHullIndex referenceIndex;
+    private string indexedFolder;      // folder the current index was built from
+    private string loadedPath;         // file the current trajectory came from
     private ReferenceHullIndex.Entry referenceEntry;
     private LineRenderer referenceHullLine;
     private readonly List<Vector2> referenceOutline = new List<Vector2>();
@@ -368,6 +372,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         }
 
         trajectory = loaded;
+        loadedPath = path;
         BuildAgents();
         ApplyRecordedSceneState();
         ComputeBaselineHull();
@@ -647,29 +652,35 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         TrajectoryHeader h = trajectory.header;
 
+        // A zero-randomness clip is its own answer. This is the most common reason the panel shows
+        // nothing, and it is not a fault: 130 of the 390 clips in a three-level batch are
+        // references. Load one with random movement to see a comparison.
         if (Mathf.Abs(h.randomMovement) <= 0.001f)
         {
-            referenceStatus = "this run IS the reference";
+            referenceStatus = "this clip has randomMovement 0, so it IS a reference — "
+                            + "load a randomised clip to compare against it";
             return;
         }
 
         if (string.IsNullOrEmpty(h.spawnLayoutId))
         {
-            referenceStatus = "no spawn layout recorded, nothing to match";
+            referenceStatus = "this clip records no spawnLayoutId, so there is no layout to match";
             return;
         }
 
         ReferenceHullIndex index = EnsureReferenceIndex();
         if (index == null || index.Count == 0)
         {
-            referenceStatus = "no reference recordings indexed";
+            referenceStatus = "no reference video found in this clip's folder";
             return;
         }
 
         if (!index.TryGet(h.spawnLayoutId, h.perceptionRadius, h.maxSpeed,
                           out ReferenceHullIndex.Entry entry))
         {
-            referenceStatus = $"none for R {h.perceptionRadius:F2}, maxSpeed {h.maxSpeed:F2}";
+            referenceStatus = $"no reference video found for layout "
+                            + $"{entryLayoutShort(h.spawnLayoutId)}, R {h.perceptionRadius:F2}, "
+                            + $"maxSpeed {h.maxSpeed:F2}";
             return;
         }
 
@@ -739,30 +750,37 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         return SwarmDensityMetrics.TrimmedHullArea(points, hullTrimFraction);
     }
 
-    private ReferenceHullIndex EnsureReferenceIndex()
+    /// <summary>Trailing part of a layout id, for a readable status line.</summary>
+    private static string entryLayoutShort(string layoutId)
     {
-        if (referenceIndex != null && !rebuildReferenceIndex) return referenceIndex;
-
-        referenceIndex = ReferenceHullIndex.Build(ResolveProjectPath(referenceHullFolder),
-                                                  useCache: !rebuildReferenceIndex);
-        rebuildReferenceIndex = false;
-        return referenceIndex;
+        if (string.IsNullOrEmpty(layoutId)) return "?";
+        int at = layoutId.LastIndexOf("_layout_", System.StringComparison.Ordinal);
+        return at >= 0 ? layoutId.Substring(at + 8) : layoutId;
     }
 
     /// <summary>
-    /// Project-relative path to absolute. Application.dataPath already ends in "Assets", so a path
-    /// beginning "Assets/" would otherwise resolve to "Assets/Assets/...".
+    /// Indexes the references sitting in the same folder as the loaded recording.
+    ///
+    /// Rebuilt whenever the folder changes, because it follows whichever clip is open.
     /// </summary>
-    private static string ResolveProjectPath(string path)
+    private ReferenceHullIndex EnsureReferenceIndex()
     {
-        if (string.IsNullOrEmpty(path)) return path;
+        if (string.IsNullOrEmpty(loadedPath)) return null;
 
-        string trimmed = path.Trim().Replace('\\', '/').TrimEnd('/');
-        if (Path.IsPathRooted(trimmed)) return trimmed;
-        if (trimmed.Equals("Assets", System.StringComparison.OrdinalIgnoreCase)) return Application.dataPath;
-        if (trimmed.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase)) trimmed = trimmed.Substring(7);
+        string folder = Path.GetDirectoryName(loadedPath);
+        if (string.IsNullOrEmpty(folder)) return null;
 
-        return Path.Combine(Application.dataPath, trimmed);
+        if (referenceIndex != null && !rebuildReferenceIndex && folder == indexedFolder)
+        {
+            return referenceIndex;
+        }
+
+        Debug.Log($"[Replay] Indexing reference runs in this clip's folder: '{folder}'");
+
+        referenceIndex = ReferenceHullIndex.Build(folder, useCache: !rebuildReferenceIndex);
+        indexedFolder = folder;
+        rebuildReferenceIndex = false;
+        return referenceIndex;
     }
 
     /// <summary>

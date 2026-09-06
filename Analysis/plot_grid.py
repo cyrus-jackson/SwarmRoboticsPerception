@@ -66,6 +66,12 @@ def load_runs(folder: Path) -> list[dict]:
             seen.update(f.get("c") or [])
             unique[i] = len(seen)
 
+        # Connected group sizes per frame, largest first. Empty list on older recordings, so
+        # clusters[i] == [] is "not captured" while [40] is "one intact group".
+        clusters = [list(f.get("k") or []) for f in frames]
+        cluster_count = np.array([len(k) for k in clusters], dtype=int)
+        largest = np.array([k[0] if k else 0 for k in clusters], dtype=int)
+
         runs.append({
             "path": path,
             "header": header,
@@ -73,6 +79,9 @@ def load_runs(folder: Path) -> list[dict]:
             "areas": areas,
             "contacts": contacts,
             "unique": unique,
+            "clusters": clusters,
+            "cluster_count": cluster_count,
+            "largest_cluster": largest,
             # Rounded so float noise like 0.15000000596 groups cleanly.
             **{k: round(float(header.get(k, 0.0)), 4) for k in FACTORS},
         })

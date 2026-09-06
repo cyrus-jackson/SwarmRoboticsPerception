@@ -34,6 +34,15 @@ public class GoalArea : MonoBehaviour
     /// <summary>Number of agents inside the area as of the last evaluation.</summary>
     public int AgentsInside { get; private set; }
 
+    /// <summary>
+    /// Number of distinct agents that have been inside at any point since the last ResetTracking().
+    ///
+    /// Only ever rises. An agent that enters and drifts back out still counts, which is what makes
+    /// this a measure of how many reached the area rather than how many happen to be standing in it
+    /// at one instant.
+    /// </summary>
+    public int AgentsEverInside { get; private set; }
+
     /// <summary>Number of non-null agents considered in the last evaluation.</summary>
     public int TrackedAgents { get; private set; }
 
@@ -43,9 +52,16 @@ public class GoalArea : MonoBehaviour
     public float FractionInside => TrackedAgents > 0 ? (float)AgentsInside / TrackedAgents : 0f;
     public float PercentInside => FractionInside * 100f;
 
+    public float FractionEverInside => TrackedAgents > 0 ? (float)AgentsEverInside / TrackedAgents : 0f;
+    public float PercentEverInside => FractionEverInside * 100f;
+
     private Collider2D areaCollider;
     private int lastLoggedCount = -1;
     private float lastLogTime = -999f;
+
+    // One flag per agent slot. Indexed rather than keyed on the object, because the agent array is
+    // stable for the length of a run and the recorder already identifies agents by that index.
+    private bool[] everInside = new bool[0];
 
     void Awake()
     {
@@ -72,10 +88,13 @@ public class GoalArea : MonoBehaviour
     public void ResetTracking()
     {
         AgentsInside = 0;
+        AgentsEverInside = 0;
         TrackedAgents = 0;
         HasEvaluated = false;
         lastLoggedCount = -1;
         lastLogTime = -999f;
+
+        System.Array.Clear(everInside, 0, everInside.Length);
     }
 
     /// <summary>
@@ -90,14 +109,29 @@ public class GoalArea : MonoBehaviour
 
         if (agents != null)
         {
-            foreach (GameObject agentObj in agents)
+            // A different array length means the swarm was respawned, so the previous run's arrivals
+            // must not carry over into this one.
+            if (everInside.Length != agents.Length)
             {
+                everInside = new bool[agents.Length];
+                AgentsEverInside = 0;
+            }
+
+            for (int i = 0; i < agents.Length; i++)
+            {
+                GameObject agentObj = agents[i];
                 if (agentObj == null) continue;
                 tracked++;
 
                 if (Contains(agentObj.transform.position))
                 {
                     inside++;
+
+                    if (!everInside[i])
+                    {
+                        everInside[i] = true;
+                        AgentsEverInside++;
+                    }
                 }
             }
         }

@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from plot_grid import load_runs
+import steady_state as ss
 
 STRIDE = 5  # x, y, rotation, vx, vy
 
@@ -50,10 +51,18 @@ RANDOM_STYLE = {0: "-", 40: "-", 80: "--"}
 
 
 def load_folder(parent: Path) -> list[dict]:
-    """Every run under a parent folder, with its condition attached."""
+    """
+    Every run under a parent folder, with its condition attached.
+
+    The parent itself is always searched, not only when it has no subfolders. The old rule —
+    "use subfolders, or the parent if there are none" — broke the moment anything created a
+    subfolder next to the recordings. Running this script once with the default `--out` writes
+    `<input>/figures`, so the second run on the same batch folder found one subfolder, ignored
+    every recording beside it, and died with "no recordings found" on a folder full of them.
+    """
     folders = [p for p in sorted(parent.iterdir()) if p.is_dir()]
-    if not folders and list(parent.glob("*.json")):
-        folders = [parent]
+    if list(parent.glob("*.json")):
+        folders.append(parent)
 
     runs = []
     for folder in folders:
@@ -73,31 +82,60 @@ def load_folder(parent: Path) -> list[dict]:
     return runs
 
 
+def find_spawn_layouts_folder(parent: Path, levels: int = 4) -> Path | None:
+    """
+    Locate SimulationRecordings/SpawnLayouts by walking up from the batch folder.
+
+    How far up it sits depends on where the batch was written. A matched-start batch lands in
+    SimulationRecordings/MatchedStart_X/<timestamp>/, a Combinations one in
+    SimulationRecordings/Combinations/<timestamp>/, and pointing the script at a parent rather than
+    a single batch shifts it again. Checking only one or two levels quietly found nothing and the
+    spawn figure went missing without an error.
+    """
+    here = parent.resolve()
+    for _ in range(levels + 1):
+        candidate = here / "SpawnLayouts"
+        if candidate.is_dir():
+            return candidate
+        if here.parent == here:
+            break
+        here = here.parent
+    return None
+
+
 def load_layouts(runs: list[dict], parent: Path) -> dict:
     """
     The saved spawn layouts, as {layoutId: (N, 2) array}.
 
     Prefers the layout files written at spawn time. Where one is missing, falls back to frame 0 of
-    a zero-randomness run on that layout — those move only after the rules act, so their first
-    recorded frame still sits on the spawn.
+    a zero-randomness run on that layout — with no random movement the swarm only moves once the
+    rules act, so its first recorded frame still sits on the spawn.
     """
     positions = {}
 
-    for folder in (parent / "SpawnLayouts", parent.parent / "SpawnLayouts"):
-        if not folder.is_dir():
-            continue
+    folder = find_spawn_layouts_folder(parent)
+    if folder is not None:
         for path in sorted(folder.glob("*.json")):
-            data = json.loads(path.read_text())
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                continue
             flat = data.get("positions") or []
             if flat:
                 positions[data.get("layoutId", path.stem)] = np.array(flat).reshape(-1, 2)
 
+    # Keep only the layouts these runs actually used, so pointing at one small batch does not
+    # scatter the figure with every layout ever saved.
+    used = {r["layout"] for r in runs}
+    positions = {k: v for k, v in positions.items() if k in used}
+
+    # Fallback reads the file, because load_runs deliberately does not keep frame data in memory.
     for run in runs:
         if run["layout"] in positions or run["random"] != 0:
             continue
-        first = run["frames"][0] if "frames" in run else None
+        first = frame_zero(run)
         if first is not None:
-            positions[run["layout"]] = np.array(first["v"]).reshape(-1, STRIDE)[:, :2]
+            positions[run["layout"]] = first
 
     return positions
 
@@ -417,22 +455,568 @@ def reference_figure(runs: list[dict], speed: float, radii=None, mode: str = "ov
     return fig
 
 
-def summary_figure(runs: list[dict], speed: float):
-    """Peak hull area against perception radius, one line per random level, averaged over layouts."""
+def plateau_figure(runs: list[dict], speed: float, radius: float, random_overlay: int = 40,
+                   slope_tolerance: float = 0.02, hold_seconds: float = 3.0,
+                   window_seconds: float = 1.0):
+    """
+    Shows exactly where A*(R) comes from, on one perception radius.
+
+    A* is built only from the zero-randomness runs. Each one is plateau-detected on its own and
+    contributes one number; A*(R) is the mean of those, and its spread is the spread across spawn
+    layouts. The randomised runs never feed into it — they are only ever measured against it.
+
+    Three panels, left to right:
+
+      A  the five reference hulls, with the detected plateau marked on each and A* as a level
+      B  the rolling slope those markers came from, against the tolerance band it must stay inside
+      C  the five plateau values that were averaged, and the mean with its spread
+    """
+    references = sorted(select(runs, speed=speed, random=0, R=radius), key=lambda r: r["layout"])
+    if not references:
+        raise SystemExit(f"no zero-randomness runs at maxSpeed {speed}, R {radius}")
+
+    plateaus = [ss.find_plateau(r["times"], r["areas"],
+                                slope_tolerance=slope_tolerance,
+                                hold_seconds=hold_seconds,
+                                window_seconds=window_seconds)
+                for r in references]
+    astar = float(np.mean([p["area"] for p in plateaus]))
+    spread = float(np.std([p["area"] for p in plateaus]))
+
+    fig, ax = plt.subplots(1, 3, figsize=(15, 4.6), layout="constrained",
+                           gridspec_kw={"width_ratios": [1.5, 1.5, 1]})
+
+    colours = plt.cm.viridis(np.linspace(0.15, 0.85, len(references)))
+
+    # ---- A: hull area, plateau marked
+    for run, p, c in zip(references, plateaus, colours):
+        ax[0].plot(run["times"], run["areas"], lw=1.6, color=c, label=f"layout {_short(run['layout'])}")
+        ax[0].plot(p["time"], p["area"], marker="o", ms=7, color=c,
+                   markeredgecolor="black", markeredgewidth=0.8, zorder=5)
+
+    ax[0].axhline(astar, color="black", lw=1.6, ls="--")
+    ax[0].axhspan(astar - spread, astar + spread, color="black", alpha=0.08)
+    ax[0].annotate(f"A* = {astar:.1f} u²  ± {spread:.1f}", (0.98, astar), xycoords=("axes fraction", "data"),
+                   ha="right", va="bottom", fontsize=9)
+
+    if random_overlay:
+        for run in select(runs, speed=speed, random=random_overlay, R=radius):
+            ax[0].plot(run["times"], run["areas"], lw=1.0, color="#d62728", alpha=0.35)
+        ax[0].plot([], [], lw=1.4, color="#d62728", alpha=0.6,
+                   label=f"random {random_overlay} (not used for A*)")
+
+    ax[0].set_title("A  reference hulls, plateau marked", fontsize=10, loc="left")
+    ax[0].set_ylabel("hull area  (u²)")
+    ax[0].legend(fontsize=8, frameon=False, loc="lower right")
+
+    # ---- B: the slope the detector actually tests
+    for run, p, c in zip(references, plateaus, colours):
+        t, slope = _smooth_derivative(run["times"], run["areas"], window_seconds)
+        ax[1].plot(t, slope, lw=1.3, color=c)
+        ax[1].plot(p["time"], 0, marker="o", ms=7, color=c,
+                   markeredgecolor="black", markeredgewidth=0.8, zorder=5)
+
+    # Tolerance is a fraction of each run's own peak area, so one setting works at any scale.
+    limit = slope_tolerance * float(np.mean([r["areas"].max() for r in references]))
+    ax[1].axhspan(-limit, limit, color="#2ca02c", alpha=0.15)
+    ax[1].axhline(0, color="#888888", lw=0.9)
+    ax[1].annotate(f"±{limit:.1f} u²/s tolerance\n(2% of peak area)", (0.97, 0.92),
+                   xycoords="axes fraction", ha="right", va="top", fontsize=8, color="#2a7")
+    ax[1].annotate(f"must stay inside for {hold_seconds:g}s", (0.97, 0.72),
+                   xycoords="axes fraction", ha="right", va="top", fontsize=8, color="#555")
+
+    ax[1].set_title(f"B  d(hull)/dt over a {window_seconds:g}s window", fontsize=10, loc="left")
+    ax[1].set_ylabel("u²/s")
+
+    # ---- C: the five values that were averaged
+    xs = np.arange(len(plateaus))
+    ax[2].scatter(xs, [p["area"] for p in plateaus], s=70, c=colours,
+                  edgecolors="black", linewidths=0.8, zorder=4)
+    ax[2].axhline(astar, color="black", lw=1.6, ls="--")
+    ax[2].axhspan(astar - spread, astar + spread, color="black", alpha=0.10)
+    ax[2].set_xticks(xs)
+    ax[2].set_xticklabels([_short(r["layout"]) for r in references], fontsize=8)
+    ax[2].set_title(f"C  A* = mean of these five\n{astar:.1f} ± {spread:.1f} u²  "
+                    f"(cv {spread / max(astar, 1e-9):.1%})", fontsize=10, loc="left")
+    ax[2].set_ylabel("plateau area  (u²)")
+    ax[2].set_xlabel("spawn layout")
+
+    for a in ax[:2]:
+        a.set_xlabel("time  (s)")
+    for a in ax:
+        a.grid(alpha=0.22, lw=0.6)
+
+    settled = sum(1 for p in plateaus if p["reached"])
+    fig.suptitle(f"How A* is measured   ·   maxSpeed {speed:g}   ·   perception {radius:g}   ·   "
+                 f"{settled}/{len(plateaus)} references settled",
+                 fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+# --------------------------------------------------------------------------- clusters
+
+
+def has_clusters(run: dict) -> bool:
+    """True when this recording carries per-frame group sizes."""
+    return bool(run["header"].get("clustersRecorded")) and len(run.get("clusters", [])) > 0
+
+
+def cluster_series(run: dict, min_size: int = 1):
+    """
+    Group count and largest-group share over time.
+
+    `min_size` ignores stragglers: at 1 a lone agent is its own group, which is the paper's
+    reading ("the swarm loses one or more robots"); at 2 only real groups are counted, which is
+    usually what you want when asking how many flocks formed.
+    """
+    counts, largest = [], []
+    total = max(int(run["header"].get("agentCount", 1)), 1)
+
+    for sizes in run["clusters"]:
+        kept = [s for s in sizes if s >= min_size]
+        counts.append(len(kept))
+        largest.append((kept[0] if kept else 0) / total)
+
+    return np.asarray(counts), np.asarray(largest)
+
+
+def fragmentation_summary(run: dict, min_size: int = 2, settle_from: float = 0.5) -> dict:
+    """
+    One row per run: how fragmented it was, and whether the split lasted.
+
+    A group count on a single frame is not a finding — agents drift in and out of range constantly,
+    so a swarm can register a split for a few frames and rejoin. `held_fraction` is the share of
+    the settled part of the clip spent fragmented, which is what separates a real split from a
+    flicker.
+    """
+    counts, largest = cluster_series(run, min_size)
+    if len(counts) == 0:
+        return {}
+
+    times = run["times"]
+    late = times >= times[-1] * settle_from
+
+    fragmented = counts > 1
+    first = float(times[np.argmax(fragmented)]) if fragmented.any() else None
+
+    return {
+        "groups_final": int(counts[-1]),
+        "groups_max": int(counts.max()),
+        "groups_median_late": float(np.median(counts[late])),
+        "largest_share_final": float(largest[-1]),
+        "first_split_s": first,
+        "held_fraction": float(np.mean(fragmented[late])),
+        "ever_fragmented": bool(fragmented.any()),
+    }
+
+
+def cluster_figure(runs: list[dict], speed: float, radii=None, min_size: int = 2):
+    """Group count over time, one panel per random level, coloured by perception radius."""
+    subset = [r for r in select(runs, speed=speed, R=radii) if has_clusters(r)]
+    if not subset:
+        raise SystemExit("no recordings with cluster data — re-record with captureClusters on")
+
+    randoms = sorted({r["random"] for r in subset})
+    present = sorted({r["R"] for r in subset})
+    colour = _radius_colours(present)
+
+    fig, axes = plt.subplots(1, len(randoms), figsize=(4.6 * len(randoms) + 1.8, 4.0),
+                             sharex=True, sharey=True, squeeze=False, layout="constrained")
+    axes = axes[0]
+
+    for ax, random in zip(axes, randoms):
+        for R in present:
+            sel = select(subset, random=random, R=R)
+            if not sel:
+                continue
+
+            span = min(float(r["times"][-1]) for r in sel)
+            grid = np.linspace(0, span, 600)
+            stack = np.asarray([np.interp(grid, r["times"], cluster_series(r, min_size)[0])
+                                for r in sel])
+
+            ax.plot(grid, stack.mean(axis=0), lw=1.6, color=colour[R])
+            ax.fill_between(grid, stack.min(axis=0), stack.max(axis=0),
+                            color=colour[R], alpha=0.12, linewidth=0)
+
+        ax.axhline(1, color="#888888", lw=1.0, ls="--")
+        ax.set_title(f"random {random}", fontsize=10)
+        ax.set_xlabel("time  (s)", fontsize=9)
+        ax.grid(alpha=0.22, lw=0.6)
+
+    axes[0].set_ylabel(f"groups of {min_size}+ agents", fontsize=9)
+
+    handles = [plt.Line2D([], [], color=colour[R], lw=2.2, label=f"R {R:g}") for R in present]
+    fig.legend(handles=handles, loc="outside right upper", fontsize=8, frameon=False,
+               title="perception", title_fontsize=9)
+
+    fig.suptitle(f"Group count over time   ·   maxSpeed {speed:g}   ·   mean of layouts, "
+                 f"min–max shaded   ·   dashed line = intact", fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+def cluster_size_figure(runs: list[dict], speed: float, radii=None, frame: str = "final"):
+    """
+    Distribution of group sizes, as a stacked picture of where the agents ended up.
+
+    Each bar is one condition; the segments are the groups, largest at the bottom. A single full
+    bar means the swarm stayed intact; many thin segments mean it shattered.
+    """
+    subset = [r for r in select(runs, speed=speed, R=radii) if has_clusters(r)]
+    if not subset:
+        raise SystemExit("no recordings with cluster data")
+
+    randoms = sorted({r["random"] for r in subset})
+    present = sorted({r["R"] for r in subset})
+
+    fig, axes = plt.subplots(1, len(randoms), figsize=(4.4 * len(randoms) + 1.4, 4.2),
+                             sharey=True, squeeze=False, layout="constrained")
+    axes = axes[0]
+
+    for ax, random in zip(axes, randoms):
+        for x, R in enumerate(present):
+            sel = select(subset, random=random, R=R)
+            if not sel:
+                continue
+
+            index = -1 if frame == "final" else len(sel[0]["clusters"]) // 2
+            sizes = sel[0]["clusters"][index]
+
+            bottom = 0
+            for rank, s in enumerate(sizes):
+                ax.bar(x, s, bottom=bottom, width=0.75,
+                       color=plt.cm.tab20(rank % 20), edgecolor="white", linewidth=0.6)
+                if s >= 3:
+                    ax.text(x, bottom + s / 2, str(s), ha="center", va="center", fontsize=7.5)
+                bottom += s
+
+        ax.set_xticks(range(len(present)))
+        ax.set_xticklabels([f"{R:g}" for R in present], fontsize=8, rotation=45)
+        ax.set_title(f"random {random}", fontsize=10)
+        ax.set_xlabel("perception radius", fontsize=9)
+        ax.grid(alpha=0.22, lw=0.6, axis="y")
+
+    axes[0].set_ylabel("agents, stacked by group", fontsize=9)
+    fig.suptitle(f"Group sizes at the {frame} frame   ·   maxSpeed {speed:g}   ·   one layout",
+                 fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+# --------------------------------------------------------------- dispersion vs randomness
+
+
+def savgol_drift(times, areas, window_seconds: float = 3.0, order: int = 2):
+    """
+    d(hull)/dt estimated with a Savitzky-Golay filter instead of a difference over a window.
+
+    A boxcar difference is a low-order estimator: it averages the noise but leaves the derivative
+    itself rattling frame to frame. Savitzky-Golay fits a low-order polynomial across the window and
+    reads the derivative off the fit, which on this data gives the same drift with about a quarter
+    of the jitter:
+
+        boxcar 3 s          late mean 2.42 u2/s   roughness 0.453
+        Savitzky-Golay 3 s  late mean 2.58 u2/s   roughness 0.117
+
+    It also needs no scipy at capture time if it ever moves into Unity: for a fixed window and
+    order the filter is a constant FIR kernel, so the coefficients can be baked in.
+    """
+    from scipy.signal import savgol_filter
+
+    times = np.asarray(times, dtype=float)
+    areas = np.asarray(areas, dtype=float)
+    if len(times) < 5:
+        return np.zeros_like(areas)
+
+    dt = float(np.median(np.diff(times))) or 1e-3
+    window = max(order + 2, int(round(window_seconds / dt)) | 1)
+    window = min(window, len(areas) - (1 - len(areas) % 2))
+    if window <= order + 1:
+        return np.zeros_like(areas)
+
+    return savgol_filter(areas, window, order, deriv=1, delta=dt)
+
+
+def dispersion_end(run: dict, fraction: float = 0.15, hold_seconds: float = 3.0,
+                   window_seconds: float = 3.0) -> dict:
+    """
+    When the systematic spreading stops and what is left is random motion.
+
+    `find_plateau` asks whether the slope is small in absolute area units. On a randomised run that
+    question can never be answered yes: the drift settles to about 2.4 u2/s while the noise on the
+    slope is about 11 u2/s, so |slope| keeps crossing any tolerance set near zero, and 50-80% of
+    randomised runs are reported as never settling even after they have clearly stopped dispersing.
+
+    This asks a different question: has the drift collapsed *relative to its own peak*? Dispersion
+    produces a large early drift that decays; diffusion leaves a small residual one. Normalising by
+    the run's own peak drift makes the test scale-free and immune to the noise floor.
+
+    Returns the moment the drift first stays under `fraction` of its peak for `hold_seconds`.
+
+    Important: this marks the end of the systematic trend, not the end of all growth. After it
+    fires, a randomised hull still creeps up a further 15-45% by the timeout, because bounded
+    diffusion keeps spreading the swarm. It answers "is dispersion still driving this?", not
+    "has the hull stopped changing?".
+    """
+    times = np.asarray(run["times"], dtype=float)
+    areas = np.asarray(run["areas"], dtype=float)
+    drift = savgol_drift(times, areas, window_seconds)
+
+    # Peak taken over the first half, so a late noise spike cannot inflate the reference scale.
+    early = drift[times <= times[-1] * 0.5]
+    peak = float(np.max(early)) if len(early) else 0.0
+
+    out = {"fires": False, "time": None, "index": None, "drift": drift, "peak_drift": peak,
+           "limit": fraction * peak}
+    if peak <= 0:
+        return out
+
+    dt = float(np.median(np.diff(times))) or 1e-3
+    need = max(1, int(round(hold_seconds / dt)))
+    streak = 0
+
+    for i, value in enumerate(drift):
+        if value <= out["limit"]:
+            streak += 1
+            if streak >= need:
+                out.update(fires=True, index=i - need + 1, time=float(times[i - need + 1]))
+                return out
+        else:
+            streak = 0
+
+    return out
+
+
+def run_statistic(run: dict, statistic: str = "plateau") -> tuple[float, bool]:
+    """
+    One number summarising how far a run dispersed, plus whether it can be trusted.
+
+    "plateau" is where the hull settled, the same measure A* uses. "peak" is the largest area the
+    hull ever reached. They are not interchangeable: on a settled reference they agree to within
+    a rounding error, but on a randomised run that never settles the peak sits 8-10% above the
+    plateau, so plotting one condition's peak beside another's plateau silently compares two
+    different quantities.
+
+    The second return value is False when the run never plateaued, in which case the number is a
+    lower bound rather than a settled value.
+    """
+    if statistic == "peak":
+        return float(run["areas"].max()), True
+
+    p = ss.find_plateau(run["times"], run["areas"])
+    return float(p["area"]), bool(p["reached"])
+
+
+def _mean_over_layouts(sel, metric: str, n_agents: int = 40, points: int = 900):
+    """
+    Mean of a series across the layouts of one condition, on a common time grid.
+
+    Clips differ in length by a few frames, so they are interpolated onto a shared grid running to
+    the shortest of them rather than padded — extending the mean past where a run ended would show
+    a trend built from fewer and fewer runs.
+    """
+    if not sel:
+        return None, None, None
+
+    span = min(float(r["times"][-1]) for r in sel)
+    grid = np.linspace(0, span, points)
+
+    stack = []
+    for run in sel:
+        if metric == "walls":
+            series = run["unique"] / max(int(run["header"].get("agentCount", n_agents)), 1)
+        else:
+            series = run["areas"]
+        stack.append(np.interp(grid, run["times"], series))
+
+    stack = np.asarray(stack)
+    return grid, stack.mean(axis=0), stack.std(axis=0)
+
+
+def mean_series_figure(runs: list[dict], speed: float, metric: str = "hull", radii=None):
+    """
+    Mean series across the five layouts, one panel per random level, coloured by radius.
+
+    The per-layout grids elsewhere show every run; this collapses the layouts so the effect of the
+    parameter is readable on its own. The shaded band is ±1 sd across layouts, which is the spread
+    the paired design is meant to control for.
+    """
+    subset = select(runs, speed=speed, R=radii)
+    randoms = sorted({r["random"] for r in subset})
+    present = sorted({r["R"] for r in subset})
+    colour = _radius_colours(present)
+
+    fig, axes = plt.subplots(1, len(randoms), figsize=(4.6 * len(randoms) + 1.8, 4.0),
+                             sharex=True, sharey=True, squeeze=False, layout="constrained")
+    axes = axes[0]
+
+    for ax, random in zip(axes, randoms):
+        for R in present:
+            grid, mean, sd = _mean_over_layouts(select(subset, random=random, R=R), metric)
+            if grid is None:
+                continue
+            ax.plot(grid, mean, lw=1.6, color=colour[R])
+            ax.fill_between(grid, mean - sd, mean + sd, color=colour[R], alpha=0.15, linewidth=0)
+
+        ax.set_title(f"random {random}", fontsize=10)
+        ax.set_xlabel("time  (s)", fontsize=9)
+        ax.grid(alpha=0.22, lw=0.6)
+
+    label = "agents that have touched a wall" if metric == "walls" else "hull area  (u²)"
+    axes[0].set_ylabel(label, fontsize=9)
+    if metric == "walls":
+        axes[0].yaxis.set_major_formatter(lambda v, p: f"{v:.0%}")
+
+    handles = [plt.Line2D([], [], color=colour[R], lw=2.2, label=f"R {R:g}") for R in present]
+    fig.legend(handles=handles, loc="outside right upper", fontsize=8, frameon=False,
+               title="perception", title_fontsize=9)
+
+    what = "Wall contact" if metric == "walls" else "Hull area"
+    fig.suptitle(f"{what} over time   ·   maxSpeed {speed:g}   ·   mean of 5 layouts, ±1 sd",
+                 fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+def reference_peak_figure(runs: list[dict], speed: float, radii=None, statistic: str = "plateau"):
+    """
+    Randomised hull area against time, with the no-randomness result drawn as a level.
+
+    The horizontal line is where the swarm settles from this very layout set with randomness off,
+    so the moment a coloured trace crosses it is the moment that run has dispersed as far as
+    separation alone ever gets it. Everything above the line is dispersion randomness bought.
+    """
     subset = select(runs, speed=speed)
-    fig, ax = plt.subplots(1, 2, figsize=(11.5, 4.2), layout="constrained")
+    if radii is None:
+        available = sorted({r["R"] for r in subset})
+        radii = [available[i] for i in np.linspace(0, len(available) - 1, 4).astype(int)]
+
+    fig, axes = plt.subplots(1, len(radii), figsize=(3.7 * len(radii) + 1.4, 4.0),
+                             sharex=True, squeeze=False, layout="constrained")
+    axes = axes[0]
+
+    for ax, R in zip(axes, radii):
+        refs = select(subset, random=0, R=R)
+        level = float(np.mean([run_statistic(r, statistic)[0] for r in refs])) if refs else np.nan
+
+        for random in sorted({r["random"] for r in subset if r["random"] > 0}):
+            grid, mean, sd = _mean_over_layouts(select(subset, random=random, R=R), "hull")
+            if grid is None:
+                continue
+            colour = RANDOM_COLOUR.get(random, "#888888")
+            ax.plot(grid, mean, lw=1.7, color=colour, label=f"random {random}")
+            ax.fill_between(grid, mean - sd, mean + sd, color=colour, alpha=0.15, linewidth=0)
+
+            crossed = np.flatnonzero(mean >= level)
+            if len(crossed):
+                ax.plot(grid[crossed[0]], level, marker="v", ms=9, color=colour,
+                        markeredgecolor="black", zorder=6)
+
+        ax.axhline(level, color="#404040", lw=1.6, ls="--")
+        ax.set_title(f"R {R:g}    no-randomness {level:.0f} u²", fontsize=9.5)
+        ax.set_xlabel("time  (s)", fontsize=9)
+        ax.grid(alpha=0.22, lw=0.6)
+
+    axes[0].set_ylabel("hull area  (u²)", fontsize=9)
+    axes[0].legend(fontsize=8, frameon=False, loc="upper left")
+
+    fig.suptitle(f"Randomised dispersion against the no-randomness level   ·   maxSpeed {speed:g}"
+                 f"   ·   marker = crossing", fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+def smoothing_figure(runs: list[dict], speed: float, radius: float, random: int = 40,
+                     zoom: tuple[float, float] = (30.0, 50.0)):
+    """
+    The same derivative estimated four ways, full range and zoomed.
+
+    A boxcar difference averages the noise but leaves the derivative rattling frame to frame.
+    Savitzky-Golay fits a low-order polynomial across the window and reads the slope off the fit,
+    which recovers the same drift far more cleanly and, being symmetric, adds no lag.
+    """
+    from scipy.ndimage import gaussian_filter1d
+
+    sel = select(runs, speed=speed, random=random, R=radius)
+    if not sel:
+        raise SystemExit(f"no runs at maxSpeed {speed}, random {random}, R {radius}")
+
+    run = sel[0]
+    t = np.asarray(run["times"], dtype=float)
+    a = np.asarray(run["areas"], dtype=float)
+    dt = float(np.median(np.diff(t))) or 1e-3
+
+    def boxcar(seconds):
+        w = max(2, int(round(seconds / dt)))
+        out = np.full(len(a), np.nan)
+        out[w:] = (a[w:] - a[:-w]) / (t[w:] - t[:-w])
+        return out
+
+    series = [
+        ("boxcar 1 s  (current)", boxcar(1.0), "#cccccc", 1.0),
+        ("boxcar 3 s", boxcar(3.0), "#999999", 1.1),
+        ("Gaussian ~3 s", gaussian_filter1d(a, sigma=(3.0 / dt) / 6.0, order=1,
+                                            mode="nearest") / dt, "#2ca02c", 1.3),
+        ("Savitzky-Golay 3 s, order 2", savgol_drift(t, a, 3.0, 2), "#1f77b4", 1.8),
+    ]
+
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 4.4), layout="constrained")
+
+    for name, values, colour, lw in series:
+        rough = float(np.nanstd(np.diff(values[~np.isnan(values)][-1200:])))
+        ax[0].plot(t, values, lw=lw, color=colour, label=f"{name}   (roughness {rough:.2f})")
+        ax[1].plot(t, values, lw=lw + 0.2, color=colour)
+
+    for a_ in ax:
+        a_.axhline(0, color="#888888", lw=0.9)
+        a_.set_xlabel("time  (s)")
+        a_.grid(alpha=0.22, lw=0.6)
+
+    ax[0].set_ylabel("d(hull)/dt  (u²/s)")
+    ax[0].set_title("A  whole clip", fontsize=10, loc="left")
+    ax[0].legend(fontsize=8, frameon=False)
+    ax[1].set_xlim(*zoom)
+    ax[1].set_title(f"B  zoomed to {zoom[0]:g}-{zoom[1]:g}s, where only randomness is acting",
+                    fontsize=10, loc="left")
+
+    fig.suptitle(f"Smoothing the rate of change   ·   maxSpeed {speed:g}, R {radius:g}, "
+                 f"random {random}   ·   'roughness' = frame-to-frame jitter of the estimate",
+                 fontsize=12, ha="left", x=0.01)
+    return fig
+
+
+def summary_figure(runs: list[dict], speed: float, statistic: str = "plateau"):
+    """
+    Dispersion against perception radius, one line per random level, averaged over layouts.
+
+    Every line uses the same statistic, and conditions that did not settle are drawn dashed and
+    named in the legend, because their value is where the clip stopped rather than where the swarm
+    did. Panel B is paired within layout.
+    """
+    subset = select(runs, speed=speed)
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4.4), layout="constrained")
+
+    label = "plateau hull area" if statistic == "plateau" else "peak hull area"
+    unsettled = []
 
     for random in sorted({r["random"] for r in subset}):
         radii = sorted({r["R"] for r in select(subset, random=random)})
-        peak, spread = [], []
-        for R in radii:
-            v = [r["areas"].max() for r in select(subset, random=random, R=R)]
-            peak.append(np.mean(v))
-            spread.append(np.std(v))
-        ax[0].errorbar(radii, peak, yerr=spread, marker="o", ms=4, lw=1.8, capsize=3,
-                       color=RANDOM_COLOUR.get(random, "#888888"), label=f"random {random}")
+        values, spread, settled_fraction = [], [], []
 
-    ax[0].set_title("A  peak hull area reached", fontsize=10, loc="left")
+        for R in radii:
+            pairs = [run_statistic(r, statistic) for r in select(subset, random=random, R=R)]
+            values.append(np.mean([v for v, _ in pairs]))
+            spread.append(np.std([v for v, _ in pairs]))
+            settled_fraction.append(np.mean([s for _, s in pairs]))
+
+        share = float(np.mean(settled_fraction))
+        reliable = share > 0.999
+        if not reliable:
+            unsettled.append(f"random {random} ({share:.0%} settled)")
+
+        ax[0].errorbar(radii, values, yerr=spread, marker="o", ms=4, lw=1.8, capsize=3,
+                       ls="-" if reliable else "--",
+                       color=RANDOM_COLOUR.get(random, "#888888"),
+                       label=f"random {random}" + ("" if reliable else "  (mostly unsettled)"))
+
+    ax[0].set_title(f"A  {label}", fontsize=10, loc="left")
     ax[0].set_ylabel("hull area  (u²)")
 
     for random in sorted({r["random"] for r in subset if r["random"] > 0}):
@@ -442,7 +1026,9 @@ def summary_figure(runs: list[dict], speed: float):
             for run in select(subset, random=random, R=R):
                 ref = select(subset, random=0, R=R, layout=run["layout"])
                 if ref:
-                    pairs.append(run["areas"].max() / max(ref[0]["areas"].max(), 1e-9))
+                    a, _ = run_statistic(run, statistic)
+                    b, _ = run_statistic(ref[0], statistic)
+                    pairs.append(a / max(b, 1e-9))
             if pairs:
                 radii.append(R)
                 ratio.append(np.mean(pairs))
@@ -450,7 +1036,7 @@ def summary_figure(runs: list[dict], speed: float):
                    color=RANDOM_COLOUR.get(random, "#888888"), label=f"random {random}")
 
     ax[1].axhline(1, color="#888888", lw=1)
-    ax[1].set_title("B  peak hull ÷ its no-randomness partner", fontsize=10, loc="left")
+    ax[1].set_title(f"B  {label} ÷ its no-randomness partner, same layout", fontsize=10, loc="left")
     ax[1].set_ylabel("×")
 
     for a in ax:
@@ -458,7 +1044,8 @@ def summary_figure(runs: list[dict], speed: float):
         a.grid(alpha=0.22, lw=0.6)
         a.legend(fontsize=9, frameon=False)
 
-    fig.suptitle(f"Same-start summary   ·   maxSpeed {speed:g}   ·   mean over layouts",
+    note = f"   ·   dashed: {', '.join(unsettled)}" if unsettled else ""
+    fig.suptitle(f"Same-start summary   ·   maxSpeed {speed:g}   ·   {label}, mean over layouts{note}",
                  fontsize=12, ha="left", x=0.01)
     return fig
 

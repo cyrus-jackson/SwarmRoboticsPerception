@@ -48,6 +48,9 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
     [Range(0f, 0.5f)]
     public float hullTrimFraction = 0.1f;
 
+    [Tooltip("Record the sizes of the connected groups each frame, largest first. Groups are the connected components of the perception graph, which is how Hénard et al. define swarm fragmentation. Costs a few small integers per frame.")]
+    public bool captureClusters = true;
+
     [Header("Scene Geometry")]
     [Tooltip("Record the active obstacle so the replay shows what the agents were avoiding.")]
     public bool captureObstacle = true;
@@ -344,6 +347,15 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
             frame.a = SwarmDensityMetrics.TrimmedHullArea(hullPositionBuffer, hullTrimFraction);
         }
 
+        // Connected components of the perception graph, the paper's definition of fragmentation.
+        // Sampled from the live agents rather than the captured transforms so the neighbour test
+        // sees the same colliders SwarmAgent does.
+        if (captureClusters && swarmManager != null)
+        {
+            SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
+                                             frame.k, swarmManager.AgentColliders);
+        }
+
         working.frames.Add(frame);
     }
 
@@ -375,6 +387,8 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
 
             hullAreaRecorded = captureHullArea,
             hullTrimFraction = hullTrimFraction,
+            clustersRecorded = captureClusters && swarmManager != null,
+            clusterPerceptionRadius = swarmManager != null ? swarmManager.perceptionRadius : 0f,
 
             cohesion = swarmManager.cohesionIntensity,
             separation = swarmManager.separationIntensity,

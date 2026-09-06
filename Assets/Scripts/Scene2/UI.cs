@@ -761,12 +761,43 @@ public class UI : MonoBehaviour
             // the hull area and mean degree of the current arrangement stay visible.
             GUILayout.Label(densityMonitor.Describe(densityTargetRatio));
             GUILayout.Label(densityMonitor.DescribeConnectivity());
+            GUILayout.Label(DescribeClusters());
         }
 
         if (GUILayout.Button("Rebaseline Density"))
         {
             densityMonitor.CaptureBaseline(swarmManager != null ? swarmManager.agents : null);
         }
+    }
+
+    // Reused so the readout, which is rebuilt every OnGUI pass, allocates nothing.
+    private readonly List<int> clusterSizeBuffer = new List<int>();
+
+    /// <summary>
+    /// Live grouping readout, e.g. "Groups: 3 groups: 21, 17, 2  (largest holds 52%)".
+    ///
+    /// Groups are the connected components of the perception graph, the definition Hénard et al.
+    /// use for fragmentation. Sampled on demand rather than cached, so it stays correct while the
+    /// simulation is paused and agents are being dragged around.
+    /// </summary>
+    private string DescribeClusters()
+    {
+        if (swarmManager == null || swarmManager.agents == null) return "Groups: no agents";
+
+        SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
+                                         clusterSizeBuffer, swarmManager.AgentColliders);
+
+        if (clusterSizeBuffer.Count == 0) return "Groups: no agents";
+
+        string summary = SwarmClusterMetrics.Describe(clusterSizeBuffer);
+        if (clusterSizeBuffer.Count == 1) return $"Groups: {summary}  (intact)";
+
+        float share = SwarmClusterMetrics.LargestFraction(clusterSizeBuffer);
+        int realGroups = SwarmClusterMetrics.CountAtLeast(clusterSizeBuffer, 2);
+        int strays = clusterSizeBuffer.Count - realGroups;
+
+        return $"Groups: {summary}  (largest holds {share:P0}" +
+               (strays > 0 ? $", {strays} lone agent{(strays == 1 ? "" : "s")})" : ")");
     }
 
     public void SetSwarmType(SwarmType type)

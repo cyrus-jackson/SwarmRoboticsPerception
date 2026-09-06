@@ -129,8 +129,17 @@ public class ReferenceHullIndex
     public bool TryGet(string layoutId, float perceptionRadius, float maxSpeed, out Entry entry)
     {
         entry = null;
-        if (string.IsNullOrEmpty(layoutId) || !byLayout.TryGetValue(layoutId, out List<Entry> candidates))
+
+        if (string.IsNullOrEmpty(layoutId)) return false;
+
+        if (!byLayout.TryGetValue(layoutId, out List<Entry> candidates))
         {
+            // The index has references, just not from this layout. Naming the ones it does have is
+            // usually enough to spot the cause: a batch recorded from a different layout set.
+            List<string> known = new List<string>(byLayout.Keys);
+            known.Sort();
+            Debug.LogWarning($"[ReferenceHullIndex] No reference from layout '{layoutId}'. " +
+                             $"Indexed layouts: {(known.Count == 0 ? "none" : string.Join(", ", known))}");
             return false;
         }
 
@@ -152,7 +161,28 @@ public class ReferenceHullIndex
             }
         }
 
-        if (entry == null) return false;
+        if (entry == null)
+        {
+            // Something exists for this layout but nothing close enough on radius or speed. Print
+            // the nearest so a mismatched sweep is obvious at a glance. Reuses `best` from above,
+            // which is still float.MaxValue here because nothing passed the tolerance check.
+            Entry nearest = null;
+            foreach (Entry candidate in candidates)
+            {
+                float distance = Mathf.Abs(candidate.perceptionRadius - perceptionRadius) * 1000f
+                                 + Mathf.Abs(candidate.maxSpeed - maxSpeed);
+                if (distance < best) { best = distance; nearest = candidate; }
+            }
+
+            Debug.LogWarning(
+                $"[ReferenceHullIndex] Layout '{layoutId}' has {candidates.Count} references but none " +
+                $"within tolerance of R {perceptionRadius:F3}, maxSpeed {maxSpeed:F3}." +
+                (nearest != null
+                    ? $" Nearest is R {nearest.perceptionRadius:F3}, maxSpeed {nearest.maxSpeed:F3} " +
+                      $"(tolerances are ±{RadiusTolerance} and ±{SpeedTolerance})."
+                    : ""));
+            return false;
+        }
 
         float radiusGap = Mathf.Abs(entry.perceptionRadius - perceptionRadius);
         float speedGap = Mathf.Abs(entry.maxSpeed - maxSpeed);
@@ -183,7 +213,10 @@ public class ReferenceHullIndex
 
         if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
         {
-            Debug.LogWarning($"[ReferenceHullIndex] No folder at '{folder}'. No targets will be resolved.");
+            Debug.LogWarning($"[ReferenceHullIndex] No folder at '{folder}'.\n" +
+                             $"   Application.dataPath = '{Application.dataPath}'\n" +
+                             $"   The setting is project-relative, so 'Assets/SimulationRecordings/X' " +
+                             $"is correct and a full disk path also works. No targets will be resolved.");
             return index;
         }
 
@@ -230,6 +263,24 @@ public class ReferenceHullIndex
             Debug.Log($"[ReferenceHullIndex] {index.Count} reference targets from {files.Length} files " +
                       $"under '{folder}' ({index.FilesScanned} read, {index.FilesSkipped} from cache, " +
                       $"{clock.ElapsedMilliseconds} ms).");
+        }
+
+        if (index.Count == 0)
+        {
+            if (files.Length == 0)
+            {
+                // The case that slipped past the diagnostic before: the folder exists, so there is
+                // no "missing folder" warning, but there is nothing in it to index.
+                Debug.LogWarning($"[ReferenceHullIndex] '{folder}' exists but contains no .json " +
+                                 $"recordings, so nothing was indexed. Check this is the folder " +
+                                 $"holding the clips and not an empty or leftover one.");
+            }
+            else
+            {
+                // Say which of the three requirements the files failed rather than leaving it to
+                // guesswork: a reference must be zero-randomness, hull-captured and layout-stamped.
+                index.ReportWhyEmpty(files, randomTolerance);
+            }
         }
 
         return index;
@@ -641,6 +692,72 @@ public class ReferenceHullIndex
         {
             Debug.LogWarning($"[ReferenceHullIndex] Could not write cache: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Counts why nothing was indexed. A reference has to be a zero-randomness run, with hull area
+    /// captured, that started from a saved spawn layout — three separate ways to be excluded, and
+    /// the fix differs for each.
+    /// </summary>
+    private void ReportWhyEmpty(string[] files, float randomTolerance)
+    {
+        int randomised = 0, noHull = 0, noLayout = 0, unreadable = 0, config = 0;
+
+        foreach (string path in files)
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            if (name.EndsWith("_config", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("batch_config", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(CacheFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                config++;
+                continue;
+            }
+
+            try
+            {
+                using (FileStream stream = File.OpenRead(path))
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    TrajectoryHeader header = ReadHeader(reader);
+                    if (header == null) { unreadable++; continue; }
+
+                    if (Mathf.Abs(header.randomMovement) > randomTolerance) randomised++;
+                    else if (!header.hullAreaRecorded) noHull++;
+                    else if (string.IsNullOrEmpty(header.spawnLayoutId)) noLayout++;
+                }
+            }
+            catch { unreadable++; }
+        }
+
+        string reason;
+        if (randomised == files.Length - config)
+        {
+            reason = "every clip has random movement above zero. A reference is a run recorded with " +
+                     "randomMovement = 0; this folder holds none.";
+        }
+        else if (noLayout > 0)
+        {
+            reason = $"{noLayout} clips have no spawnLayoutId. They were recorded without a saved " +
+                     $"layout, so there is nothing to match a randomised run against. Record with " +
+                     $"'Combinations Use Spawn Layouts' on, or use a matched start batch.";
+        }
+        else if (noHull > 0)
+        {
+            reason = $"{noHull} clips have no hull area. Re-record with captureHullArea enabled.";
+        }
+        else if (unreadable > 0)
+        {
+            reason = $"{unreadable} files could not be parsed as recordings.";
+        }
+        else
+        {
+            reason = "no clip met all three requirements.";
+        }
+
+        Debug.LogWarning($"[ReferenceHullIndex] Indexed nothing from {files.Length} files: {reason}\n" +
+                         $"   breakdown — randomised: {randomised}, no hull area: {noHull}, " +
+                         $"no spawn layout: {noLayout}, unreadable: {unreadable}, config: {config}");
     }
 
     // ----------------------------------------------------------------- reporting

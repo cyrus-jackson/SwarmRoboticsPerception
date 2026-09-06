@@ -53,6 +53,23 @@ public class SwarmTrajectory
     /// <summary>True when this recording carries per-frame hull area.</summary>
     public bool HasHullArea => header != null && header.hullAreaRecorded;
 
+    /// <summary>True when this recording carries per-frame cluster sizes.</summary>
+    public bool HasClusters => header != null && header.clustersRecorded;
+
+    /// <summary>Group sizes on a frame, largest first. Empty when clusters were not captured.</summary>
+    public List<int> GetClusterSizes(int frame)
+    {
+        if (frame < 0 || frame >= FrameCount) return new List<int>();
+        return frames[frame].k ?? new List<int>();
+    }
+
+    /// <summary>Number of groups on a frame. 1 means the swarm is intact, 0 means unknown.</summary>
+    public int ClusterCount(int frame)
+    {
+        List<int> sizes = GetClusterSizes(frame);
+        return sizes != null ? sizes.Count : 0;
+    }
+
     /// <summary>Recorded trimmed hull area for a frame.</summary>
     public float GetHullArea(int frame)
     {
@@ -189,6 +206,16 @@ public class SwarmTrajectory
                     }
                 }
 
+                writer.Write("],\"k\":[");
+                if (frame.k != null)
+                {
+                    for (int i = 0; i < frame.k.Count; i++)
+                    {
+                        if (i > 0) writer.Write(',');
+                        writer.Write(frame.k[i].ToString(invariant));
+                    }
+                }
+
                 writer.Write("]}");
             }
 
@@ -237,6 +264,18 @@ public class TrajectoryFrame
     /// there is one implementation of the measure.
     /// </summary>
     public float a;
+
+    /// <summary>
+    /// Sizes of the connected groups on this frame, largest first, e.g. [21,17,1,1].
+    ///
+    /// Groups are the connected components of the perception graph, the definition Hénard et al.
+    /// use for fragmentation. Sizes rather than a per-agent label because the sizes answer the
+    /// question — how many groups, how big — at a fraction of the storage: a handful of small
+    /// integers against one per agent per frame.
+    ///
+    /// Empty on recordings made before cluster capture; check header.clustersRecorded.
+    /// </summary>
+    public List<int> k = new List<int>();
 }
 
 /// <summary>
@@ -269,6 +308,10 @@ public class TrajectoryHeader
     // Hull area capture.
     public bool hullAreaRecorded;    // false for recordings made before area was captured
     public float hullTrimFraction;   // fraction of outermost agents dropped before hulling
+
+    // Cluster capture. Groups are connected components of the perception graph, per Hénard et al.
+    public bool clustersRecorded;    // false for recordings made before clusters were captured
+    public float clusterPerceptionRadius;  // radius the graph was built with, for reproducibility
 
     public string[] agentNames;
 

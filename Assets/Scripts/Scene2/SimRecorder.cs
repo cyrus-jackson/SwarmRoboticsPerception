@@ -36,7 +36,42 @@ public enum RecordingEndCondition
     /// ratio to where this run happened to start. Use when several conditions must end at the same
     /// degree of dispersion so that the endpoint is held constant and only the motion differs.
     /// </summary>
-    AbsoluteHullAreaReached
+    AbsoluteHullAreaReached,
+    /// <summary>
+    /// Stop once the spread stops changing — the rate of change of the metric stays near zero for
+    /// a sustained stretch, rather than the value reaching some level.
+    ///
+    /// This is the right rule for a run with no random movement, which spreads and then holds. It
+    /// is not dependable with randomness: the hull keeps wobbling by several u²/s after the swarm
+    /// has stopped spreading, so the slope never stays quiet and the clip would run to the timeout.
+    /// </summary>
+    SpreadSettled
+}
+
+/// <summary>What <c>densityTargetRatio</c> is a ratio of.</summary>
+public enum DensityRatioBaseline
+{
+    /// <summary>
+    /// The metric measured at the moment capture began — this run's own starting spread.
+    ///
+    /// Right for Densification, which is asked to shrink to some fraction of where it started.
+    /// </summary>
+    RecordingStart,
+
+    /// <summary>
+    /// The settled value of the zero-randomness run from the same layout, perception radius and
+    /// max speed.
+    ///
+    /// Right for Dispersion. Without randomness the swarm spreads and then stops, so that plateau
+    /// is what separation alone achieves from this exact arrangement of agents. Measuring a
+    /// randomised run against its own starting area instead answers a different and less useful
+    /// question, because every run starts from the same small spawn regardless of radius.
+    ///
+    /// The reference is captured in memory as it records, so the zero-randomness runs must come
+    /// before the randomised ones in the batch. That is the natural order, and the recorder warns
+    /// when it is not.
+    /// </summary>
+    NoRandomnessReference
 }
 
 public class SimRecorder : MonoBehaviour
@@ -53,6 +88,9 @@ public class SimRecorder : MonoBehaviour
         [Tooltip("Seconds of simulation to run before the recorder starts, letting the swarm settle into formation. This warm-up is NOT captured in the video. Only applies while recording.")]
         public float recordingStartDelay = 0f;
 
+        [Tooltip("Seconds to keep recording AFTER the end condition fires, so the clip does not cut the instant the threshold is crossed. This tail IS captured in the video. It does not apply when the clip ended on the duration cap, because there is no event to pad there.")]
+        public float recordingEndDelay = 0f;
+
         [Tooltip("Names of walls to disable for this motion type, e.g. Wall1. Must match the object names in the UI 'Wall Setup' list. All other walls stay enabled.")]
         public List<string> wallsToDisable = new List<string>();
 
@@ -66,7 +104,10 @@ public class SimRecorder : MonoBehaviour
         [Tooltip("Which spread measure the density end condition uses for this motion type.")]
         public SwarmDensityMetric densityMetric = SwarmDensityMetric.TrimmedHullArea;
 
-        [Tooltip("Target ratio against the value measured at recording start. Below 1 is a contraction test (0.4 = shrunk to 40%), above 1 an expansion test (1.8 = grown to 180%).")]
+        [Tooltip("What densityTargetRatio is measured against. RecordingStart: the value at the moment capture began, i.e. this run's own starting spread — right for Densification, which shrinks from where it started. NoRandomnessReference: the settled value of the zero-randomness run from the SAME layout, radius and max speed — right for Dispersion, where the no-randomness swarm stops growing after a few seconds and that plateau is the natural yardstick.")]
+        public DensityRatioBaseline densityRatioBaseline = DensityRatioBaseline.RecordingStart;
+
+        [Tooltip("Target ratio against whichever baseline is selected above. Below 1 is a contraction test (0.4 = shrunk to 40%), above 1 an expansion test (1.8 = grown to 180%).")]
         public float densityTargetRatio = 0.25f;
 
         [Tooltip("Target trimmed hull area in world units for AbsoluteHullAreaReached. Whether it is a grow-to or shrink-to test is inferred from the area at recording start.")]
@@ -74,6 +115,12 @@ public class SimRecorder : MonoBehaviour
 
         [Tooltip("Seconds the end condition must hold continuously before the recording stops. Stops an oscillating swarm ending a clip on a momentary spike. 0 fires on the first crossing.")]
         public float endConditionDwellTime = 0.5f;
+
+        [Tooltip("SpreadSettled: slope limit as a fraction of the largest value seen so far, per second. 0.02 means the spread must be changing by under 2% of its peak per second.")]
+        public float settleTolerance = 0.02f;
+
+        [Tooltip("SpreadSettled: seconds the slope must stay inside the limit before the run counts as settled. Also used by the no-randomness reference run when the density ratio is measured against it.")]
+        public float settleHoldTime = 3f;
 
         [Tooltip("Optional per-type maximum recording length. Leave at 0 to use the global recordingTimePerSim.")]
         public float overrideRecordingTime = 0f;
@@ -115,12 +162,15 @@ public class SimRecorder : MonoBehaviour
         public string endReason;                     // "goal-area" or "timeout"
         public string endConditionUsed;              // end condition configured for this motion type
         public float recordingStartDelay;            // un-recorded settling time before capture began
+        public float recordingEndDelay;              // recorded tail after the end condition fired, 0 on timeout
         public string wallsDisabled;                 // walls switched off for this motion type
         public string densityMetric;                 // spread measure sampled for this sim
         public float densityBaseline;                // metric value at recording start
         public float densityAtEnd;                   // metric value when the clip ended
         public float densityRatioAtEnd;              // densityAtEnd / densityBaseline
         public float densityTargetRatio;             // 0 when the condition was not DensityRatioReached
+        public string densityBaselineSource;         // "recording start" or the no-randomness reference used
+        public float densityReferenceValue;          // settled value of the zero-randomness twin, 0 when unused
         public float absoluteHullAreaTarget;         // 0 when the condition was not AbsoluteHullAreaReached
         public float endConditionDwellTime;          // seconds the rule had to hold before firing
         public float recordedDuration;               // seconds of motion recorded
@@ -153,7 +203,7 @@ public class SimRecorder : MonoBehaviour
 
     [Header("Recording Settings")]
     [Tooltip("Maximum length of each recording. Acts as a timeout when the goal area end condition is enabled.")]
-    public float recordingTimePerSim = 60f;
+    public float recordingTimePerSim = 30f;
     [Tooltip("Capture frame rate. Hénard et al. (2024) presented stimuli at 60 fps.")]
     public int recordingFrameRate = 60;
     [Tooltip("Also write a per-frame trajectory json beside each mp4, replayable with SwarmTrajectoryPlayer.")]
@@ -167,11 +217,22 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, densityTargetRatio = 0.25f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        // Densification shrinks from where it started, so the ratio is against RecordingStart and
+        // must be clearly below 1. A value of 1 would be true on the first frame.
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.4f, recordingEndDelay = 3f },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, densityTargetRatio = 15f }
+        // Dispersion is judged against the no-randomness run from the same layout: 1.0 means the
+        // randomised swarm has spread as far as separation alone gets it, 1.2 means a fifth further.
+        // The reference run itself ends when its own spread settles, not on this ratio.
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 4f }
     };
+
+    [Tooltip("Draw the parameter and hull area line in the top left of the recorded video. The Combinations and Current Settings batches used to force this off; this switch now controls every batch type.")]
+    public bool showRecordingOverlay = true;
+
+    [Tooltip("Seconds to keep recording with the line reading 'Video Ended', so the last frames of the clip say where it stopped. Added to the clip length. 0 skips it, which means the marker lasts a single frame and is invisible on playback.")]
+    public float videoEndedMarkerSeconds = 1f;
 
     [Header("End Of Video Overlay")]
     [Tooltip("Show a full screen black card with centred text for the last moments of every recording.")]
@@ -203,13 +264,18 @@ public class SimRecorder : MonoBehaviour
     public int swarmTypeParamIterations = 4;
 
     [Header("Combinations Batch")]
+    [Tooltip("Record every combination once per saved spawn layout, using the layouts named in 'Reuse Spawn Layouts' below. This is what makes a Combinations batch analysable by matched_start.py: each clip carries the layout it began from, so it can be paired with the no-randomness run that started from the same arrangement. Off means a fresh random spawn per clip, which is not paired.")]
+    public bool combinationsUseSpawnLayouts = true;
+
     public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f, 80.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f, 80f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
-    public float[] combinationParam2Values = new float[] { 0.15f, 3.15f, 42.15f };
+    public float[] combinationParam2Values = new float[] { 0.15f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f }; // 
+    // public float[] combinationParam2Values = new float[] { 0.15f };
+
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
-    public float[] combinationParam3Values = new float[] { 1.5f, 4.0f };
+    public float[] combinationParam3Values = new float[] { 1.5f };
 
     [Header("Matched Start Batch (single parameter, identical spawns)")]
     [Tooltip("How many different starting layouts to generate. Each one is swept through every parameter value, so the comparison between values is paired and spawn luck cancels out.")]
@@ -219,7 +285,7 @@ public class SimRecorder : MonoBehaviour
     public bool saveSpawnLayouts = true;
 
     [Tooltip("Optional. Names of saved layouts to load instead of generating fresh ones, e.g. layout_00. Leave empty to generate.")]
-    public List<string> reuseSpawnLayouts = new List<string> { "20260819_150007_layout_00", "20260819_150007_layout_01", "20260819_150007_layout_02", "20260819_150007_layout_03", "20260819_150007_layout_04" };
+    public List<string> reuseSpawnLayouts = new List<string> { "20260825_140052_layout_00" };
 
     [Header("Single Parameter Batch")]
     public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.PerceptionRad;
@@ -257,6 +323,25 @@ public class SimRecorder : MonoBehaviour
     private float lastMaxRecordingTime;
     private float lastOverlayDuration;
     private float lastStartDelay;
+    private float lastEndDelay;
+
+    // Word at the front of the on-screen line: "Recording" while the window is open, "Video Ended"
+    // for the closing frames, so the mp4 says for itself where it stopped.
+    private string overlayStatus = "Recording";
+
+    // Settled spread of each zero-randomness run, keyed by layout, perception radius and max speed.
+    // Filled as those runs record, so a randomised run later in the same batch can be measured
+    // against the plateau its own no-randomness twin reached rather than against its spawn area.
+    private readonly Dictionary<string, float> referenceDensityValues = new Dictionary<string, float>();
+
+    // Metric samples for the run in progress, used to take a settled value at the end of it.
+    private readonly List<float> referenceSampleBuffer = new List<float>();
+
+    // Resolved for the run being recorded: 0 when the ratio is against this run's own start.
+    private float resolvedReferenceValue;
+    private string lastDensityBaselineSource = "recording start";
+
+    private readonly SpreadSettleDetector settleDetector = new SpreadSettleDetector();
     private string lastWallsDisabled = "";
 
     // Set while a matched start batch is running, so each clip records which layout it began from.
@@ -340,6 +425,75 @@ public class SimRecorder : MonoBehaviour
         CaptureDensityBaseline(settings);
     }
 
+    /// <summary>
+    /// Identifies a condition that a reference and its randomised partners share.
+    ///
+    /// Rounded to two decimals. Within one batch the values come from the same arrays and are
+    /// bitwise identical, so this only guards against float formatting, not slider drift across
+    /// separate recording sessions.
+    /// </summary>
+    private string ReferenceKey(float perceptionRadius, float maxSpeed)
+    {
+        return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                             "{0}|{1:F2}|{2:F2}",
+                             activeSpawnLayoutId ?? "none", perceptionRadius, maxSpeed);
+    }
+
+    /// <summary>True when the run being recorded is a zero-randomness reference.</summary>
+    private bool CurrentRunIsReference =>
+        swarmManager != null && Mathf.Abs(swarmManager.randomMovementIntensity) <= 0.001f;
+
+    /// <summary>
+    /// Settled value of the run just finished, stored for its randomised partners.
+    ///
+    /// Takes the median of the last few seconds rather than the final frame: the hull twitches by a
+    /// unit or two even when the swarm has stopped, and a single frame would carry that into every
+    /// clip that later uses this as a target.
+    /// </summary>
+    private void StoreReferenceValue(float perceptionRadius, float maxSpeed, float tailSeconds = 3f)
+    {
+        if (referenceSampleBuffer.Count == 0) return;
+
+        int wanted = Mathf.Clamp(Mathf.RoundToInt(tailSeconds * recordingFrameRate),
+                                 1, referenceSampleBuffer.Count);
+
+        List<float> tail = referenceSampleBuffer.GetRange(referenceSampleBuffer.Count - wanted, wanted);
+        tail.Sort();
+        float settled = tail.Count % 2 == 1
+            ? tail[tail.Count / 2]
+            : 0.5f * (tail[tail.Count / 2 - 1] + tail[tail.Count / 2]);
+
+        string key = ReferenceKey(perceptionRadius, maxSpeed);
+        referenceDensityValues[key] = settled;
+
+        Debug.Log($"[SimRecorder] Reference for {key} settled at {settled:F2} " +
+                  $"(median of the last {wanted} samples). Randomised runs at these settings will " +
+                  $"use it as their densityTargetRatio baseline.");
+    }
+
+    /// <summary>
+    /// The density rule, against whichever baseline this motion type selected.
+    ///
+    /// With RecordingStart this is the monitor's own ratio test. With NoRandomnessReference the
+    /// denominator is the settled value of the zero-randomness twin instead, so a target of 1.0
+    /// means "spread as far as the swarm gets with no randomness at all" and 1.5 means "half as far
+    /// again". Direction follows the ratio in both cases: below 1 is a contraction test.
+    /// </summary>
+    private bool IsDensityRatioReached(SwarmDensityMonitor monitor, MotionTypeRecordingSettings settings)
+    {
+        if (monitor == null || settings.densityTargetRatio <= 0f) return false;
+
+        if (resolvedReferenceValue <= 0f)
+        {
+            return monitor.IsRatioReached(settings.densityTargetRatio);
+        }
+
+        float target = settings.densityTargetRatio * resolvedReferenceValue;
+        return settings.densityTargetRatio < 1f
+            ? monitor.CurrentValue <= target
+            : monitor.CurrentValue >= target;
+    }
+
     /// <summary>Points the monitor at this motion type's metric and takes the reference measurement.</summary>
     private void CaptureDensityBaseline(MotionTypeRecordingSettings settings)
     {
@@ -383,12 +537,17 @@ public class SimRecorder : MonoBehaviour
                 case RecordingEndCondition.AbsoluteHullAreaReached:
                     rule = $"AbsoluteHullAreaReached@{entry.absoluteHullAreaTarget:F0}u2";
                     break;
+
+                case RecordingEndCondition.SpreadSettled:
+                    rule = $"SpreadSettled@{entry.settleTolerance:P0}/s held {entry.settleHoldTime:F1}s";
+                    break;
                 default:
                     rule = "FixedDuration";
                     break;
             }
 
-            string description = $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,{rule}";
+            string tail = entry.recordingEndDelay > 0f ? $",tail {entry.recordingEndDelay:F1}s" : "";
+            string description = $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,{rule}{tail}";
 
             if (entry.overrideRecordingTime > 0f)
             {
@@ -443,12 +602,105 @@ public class SimRecorder : MonoBehaviour
         bool wantsAbsoluteArea = settings.endCondition == RecordingEndCondition.AbsoluteHullAreaReached;
         bool absoluteAreaEnabled = wantsAbsoluteArea && densityMonitor != null && settings.absoluteHullAreaTarget > 0f;
 
+        // Resolve what densityTargetRatio is a ratio of, for this specific run.
+        float perceptionRadius = swarmManager != null ? swarmManager.perceptionRadius : 0f;
+        float runMaxSpeed = swarmManager != null ? swarmManager.maxSpeed : 0f;
+        bool isReferenceRun = CurrentRunIsReference;
+
+        resolvedReferenceValue = 0f;
+        lastDensityBaselineSource = "recording start";
+        referenceSampleBuffer.Clear();
+
+        // A run that will serve as the reference has to stop when its spread stops changing, not
+        // when it reaches some ratio of its own spawn area. Measured against its own start, a
+        // dispersing swarm passes any ratio above 1 within a second or two and the clip ends while
+        // the agents are still visibly spreading — which is exactly what the reference must not do,
+        // since its settled value is what every randomised run is then judged against.
+        bool referenceMustSettle = wantsDensityCondition && isReferenceRun &&
+                                   settings.densityRatioBaseline == DensityRatioBaseline.NoRandomnessReference;
+
+        bool wantsSettle = settings.endCondition == RecordingEndCondition.SpreadSettled || referenceMustSettle;
+        bool settleEnabled = wantsSettle && densityMonitor != null;
+
+        if (settleEnabled)
+        {
+            settleDetector.Reset();
+            settleDetector.tolerance = Mathf.Max(0.0001f, settings.settleTolerance);
+            settleDetector.holdSeconds = Mathf.Max(0f, settings.settleHoldTime);
+
+            if (referenceMustSettle)
+            {
+                // The ratio rule is replaced for this run, not applied alongside it.
+                densityConditionEnabled = false;
+                Debug.Log($"[SimRecorder] {swarmType}: this is the no-randomness reference, so it runs " +
+                          $"until its spread settles (slope under {settings.settleTolerance:P0} of peak " +
+                          $"per second for {settings.settleHoldTime:F1}s) rather than to a ratio.");
+            }
+        }
+
+        if (wantsSettle && densityMonitor == null)
+        {
+            Debug.LogWarning($"[SimRecorder] {swarmType} needs the spread settling rule but no density " +
+                             $"monitor was found; falling back to the {maxTime:F2}s duration.");
+        }
+
+        // A ratio measured against this run's own start is satisfied the instant recording begins
+        // when the target is 1, because the value and its baseline are the same number at that
+        // moment. The clip then ends after only the dwell, with the swarm still at its spawn.
+        // Against the no-randomness reference a target of 1 is perfectly meaningful — "spread as
+        // far as the reference did" — so the guard applies only to the RecordingStart baseline.
+        const float RatioMargin = 0.05f;
+        if (wantsDensityCondition &&
+            settings.densityRatioBaseline == DensityRatioBaseline.RecordingStart &&
+            Mathf.Abs(settings.densityTargetRatio - 1f) < RatioMargin)
+        {
+            densityConditionEnabled = false;
+            Debug.LogError(
+                $"[SimRecorder] {swarmType}: densityTargetRatio is {settings.densityTargetRatio:F2} " +
+                $"against the recording-start baseline, which is already true on the first frame — " +
+                $"the ratio starts at exactly 1. Every clip would end after just the dwell with the " +
+                $"swarm still at its spawn. Use a target clearly above 1 to grow (1.5, 2.0) or below " +
+                $"it to shrink (0.4), or set 'Ratio Measured Against' to NoRandomnessReference, where " +
+                $"1.0 means 'spread as far as the run without randomness'. Recording to the " +
+                $"{maxTime:F2}s duration instead.");
+        }
+
+        if (wantsDensityCondition &&
+            settings.densityRatioBaseline == DensityRatioBaseline.NoRandomnessReference &&
+            !isReferenceRun)
+        {
+            string key = ReferenceKey(perceptionRadius, runMaxSpeed);
+
+            if (referenceDensityValues.TryGetValue(key, out float reference) && reference > 0f)
+            {
+                resolvedReferenceValue = reference;
+                lastDensityBaselineSource = $"no-randomness reference {reference:F2}";
+            }
+            else
+            {
+                // Falling back silently would put this clip on a different scale from the rest of
+                // the batch, which is the whole thing the reference baseline exists to prevent.
+                densityConditionEnabled = false;
+                lastDensityBaselineSource = "MISSING reference";
+                Debug.LogWarning(
+                    $"[SimRecorder] {swarmType}: densityTargetRatio is set to measure against the " +
+                    $"no-randomness reference, but none has been recorded for {key}. Record the " +
+                    $"randomMovement = 0 runs before the randomised ones in the same batch " +
+                    $"(put 0 first in Combination Param 1 Values). Falling back to the " +
+                    $"{maxTime:F2}s duration for this clip.");
+            }
+        }
+
         // The condition must hold continuously for this long before the clip ends, so a swarm whose
         // hull oscillates cannot stop a recording on a momentary spike.
         float dwellRequired = Mathf.Max(0f, settings.endConditionDwellTime);
         float heldFor = 0f;
 
         lastEndReason = "timeout";
+        // Reset per run: a clip that ends on the duration cap has no tail, and leaving the previous
+        // run's value in place would report one it never recorded.
+        lastEndDelay = 0f;
+        overlayStatus = "Recording";
         lastGoalAreaName = goalArea != null ? goalArea.name : null;
         lastSwarmType = swarmType;
         lastEndConditionUsed = settings.endCondition;
@@ -478,24 +730,57 @@ public class SimRecorder : MonoBehaviour
             yield return new WaitForEndOfFrame();
             timer += Time.deltaTime;
 
+            // A zero-randomness run is a reference for everything else at these settings, so keep
+            // its metric as it goes. Sampled during the recorded window only, which is the same
+            // span the clip and the trajectory cover.
+            if (isReferenceRun && densityMonitor != null && densityMonitor.HasSampled)
+            {
+                referenceSampleBuffer.Add(densityMonitor.CurrentValue);
+            }
+
             // Evaluate whichever rule this motion type uses, then apply the dwell requirement to it.
             bool conditionMet = false;
             string reason = null;
             string detail = null;
 
-            if (goalConditionEnabled && goalArea.IsPercentReached(settings.goalAreaAgentPercent))
+            // Fed every frame so the slope is measured over real elapsed time, whatever the frame rate.
+            bool spreadSettled = false;
+            if (settleEnabled && densityMonitor.HasSampled)
+            {
+                spreadSettled = settleDetector.Push(timer, densityMonitor.CurrentValue);
+            }
+
+            if (spreadSettled)
+            {
+                conditionMet = true;
+                reason = "spread-settled";
+                detail = $"{densityMonitor.MetricName} stopped changing — {settleDetector.Describe()}";
+            }
+            else if (goalConditionEnabled && goalArea.IsPercentReached(settings.goalAreaAgentPercent))
             {
                 conditionMet = true;
                 reason = "goal-area";
                 detail = $"goal area '{goalArea.name}' holding {goalArea.AgentsInside}/{goalArea.TrackedAgents} agents " +
                          $"({goalArea.PercentInside:F1}% >= {settings.goalAreaAgentPercent:F1}%)";
             }
-            else if (densityConditionEnabled && densityMonitor.IsRatioReached(settings.densityTargetRatio))
+            else if (densityConditionEnabled && IsDensityRatioReached(densityMonitor, settings))
             {
                 conditionMet = true;
                 reason = "density-ratio";
-                detail = $"{densityMonitor.MetricName} {densityMonitor.CurrentValue:F3} / baseline {densityMonitor.Baseline:F3} " +
-                         $"= ratio {densityMonitor.Ratio:F2} (target {settings.densityTargetRatio:F2})";
+
+                if (resolvedReferenceValue > 0f)
+                {
+                    float target = settings.densityTargetRatio * resolvedReferenceValue;
+                    detail = $"{densityMonitor.MetricName} {densityMonitor.CurrentValue:F3} vs the " +
+                             $"no-randomness reference {resolvedReferenceValue:F3} " +
+                             $"= ratio {densityMonitor.CurrentValue / resolvedReferenceValue:F2} " +
+                             $"(target {settings.densityTargetRatio:F2}, i.e. {target:F2})";
+                }
+                else
+                {
+                    detail = $"{densityMonitor.MetricName} {densityMonitor.CurrentValue:F3} / baseline {densityMonitor.Baseline:F3} " +
+                             $"= ratio {densityMonitor.Ratio:F2} (target {settings.densityTargetRatio:F2})";
+                }
             }
             else if (absoluteAreaEnabled && densityMonitor.IsHullAreaReached(settings.absoluteHullAreaTarget))
             {
@@ -514,6 +799,25 @@ public class SimRecorder : MonoBehaviour
                     lastEndReason = reason;
                     string held = dwellRequired > 0f ? $", held {heldFor:F2}s" : "";
                     Debug.Log($"[SimRecorder] {swarmType}: {detail} after {timer:F2}s{held} — ending recording early.");
+
+                    // Keep rolling for the tail so the clip does not cut on the exact frame the
+                    // rule fired. Recorded, unlike the start delay, and counted into the duration.
+                    if (settings.recordingEndDelay > 0f)
+                    {
+                        Debug.Log($"[SimRecorder] {swarmType}: recording a further " +
+                                  $"{settings.recordingEndDelay:F2}s after the rule fired.");
+
+                        float tail = 0f;
+                        while (tail < settings.recordingEndDelay)
+                        {
+                            yield return new WaitForEndOfFrame();
+                            tail += Time.deltaTime;
+                            timer += Time.deltaTime;
+                        }
+
+                        lastEndDelay = tail;
+                    }
+
                     break;
                 }
             }
@@ -524,7 +828,30 @@ public class SimRecorder : MonoBehaviour
             }
         }
 
+        // Mark the closing frames while the recorder is still running, so the clip itself shows
+        // where it stopped. A single frame at 60 fps is invisible on playback, hence the hold.
+        overlayStatus = "Video Ended";
+
+        if (videoEndedMarkerSeconds > 0f)
+        {
+            float marker = 0f;
+            while (marker < videoEndedMarkerSeconds)
+            {
+                yield return new WaitForEndOfFrame();
+                marker += Time.deltaTime;
+                timer += Time.deltaTime;
+            }
+        }
+
         lastRecordedDuration = timer;
+
+        // Store the settled value now the window has closed, so the randomised runs that follow in
+        // this batch can be measured against it.
+        if (isReferenceRun)
+        {
+            StoreReferenceValue(perceptionRadius, runMaxSpeed);
+        }
+
         lastAgentsInsideGoalArea = goalArea != null ? goalArea.AgentsInside : 0;
         lastPercentInsideGoalArea = goalArea != null ? goalArea.PercentInside : 0f;
         lastDensityMetricName = densityMonitor != null ? densityMonitor.MetricName : null;
@@ -595,12 +922,15 @@ public class SimRecorder : MonoBehaviour
         config.goalAreaName = lastGoalAreaName;
         config.endConditionUsed = lastEndConditionUsed.ToString();
         config.recordingStartDelay = lastStartDelay;
+        config.recordingEndDelay = lastEndDelay;
         config.wallsDisabled = lastWallsDisabled;
         config.densityMetric = lastDensityMetricName;
         config.densityBaseline = lastDensityBaseline;
         config.densityAtEnd = lastDensityValue;
         config.densityRatioAtEnd = lastDensityRatio;
         config.densityTargetRatio = lastDensityTargetRatio;
+        config.densityBaselineSource = lastDensityBaselineSource;
+        config.densityReferenceValue = resolvedReferenceValue;
         config.absoluteHullAreaTarget = lastAbsoluteAreaTarget;
         config.endConditionDwellTime = lastDwellTime;
 
@@ -667,39 +997,22 @@ public class SimRecorder : MonoBehaviour
             style.fontStyle = FontStyle.Bold;
             style.normal.textColor = Color.black;
 
-            string displayText;
-            if (isObstacleSpawnBatchMode)
-            {
-                displayText = $"Obstacle: {currentObstacleDisplayName} | Spawn: {currentSpawnLocationDisplayName}";
-            }
-            else if (isObstacleBatchMode)
-            {
-                displayText = $"Obstacle: {currentObstacleDisplayName} | {obstacleBatchParameter}: {currentParam1DisplayValue:F2}";
-            }
-            else if (isSingleParameterBatchMode)
-            {
-                displayText = $"{singleBatchParameter}: {currentParam1DisplayValue:F2}";
-            }
-            else if (isSwarmTypeBatchMode)
-            {
-                displayText = $"Type: {currentSwarmTypeDisplay} | {swarmTypeBatchParameter}: {currentParam1DisplayValue:F2}";
-            }
-            else
-            {
-                displayText = $"{parameterToRecord1}: {currentParam1DisplayValue:F2} | {parameterToRecord2}: {currentParam2DisplayValue:F2}";
-            }
+            // Read from the manager rather than the per-batch display fields, so the line is the
+            // values actually in force whichever batch type is running.
+            float random = swarmManager != null ? swarmManager.randomMovementIntensity : 0f;
+            float perception = swarmManager != null ? swarmManager.perceptionRadius : 0f;
 
+            // Distinct agents that have reached this motion type's goal area at any point, not the
+            // number standing in it right now. A running total is what "reached" means, and it never
+            // drops when an agent drifts back out. Shows "-" rather than 0/0 when no goal area is
+            // assigned, so an unwired area is not mistaken for a swarm that never arrived.
             GoalArea overlayGoalArea = ResolveGoalArea();
-            if (overlayGoalArea != null)
-            {
-                displayText += $" | In area: {overlayGoalArea.AgentsInside}/{overlayGoalArea.TrackedAgents}";
-            }
+            string reached = overlayGoalArea != null
+                ? $"{overlayGoalArea.AgentsEverInside}/{overlayGoalArea.TrackedAgents}"
+                : "-";
 
-            SwarmDensityMonitor overlayDensity = ResolveDensityMonitor();
-            if (overlayDensity != null && overlayDensity.HasBaseline)
-            {
-                displayText += $" | Density ratio: {overlayDensity.Ratio:F2}";
-            }
+            string displayText = $"{overlayStatus} | Random: {random:F0} | Perception: {perception:F2} " +
+                                 $"| Agents reached: {reached}";
 
             GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
             GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
@@ -736,6 +1049,82 @@ public class SimRecorder : MonoBehaviour
     /// value, which makes the comparison paired: within a layout, the only thing that differs is
     /// the parameter. Several layouts are used so a conclusion does not rest on one lucky spawn.
     /// </summary>
+    /// <summary>
+    /// Loads the spawn layouts named in <c>reuseSpawnLayouts</c> from SimulationRecordings/SpawnLayouts.
+    ///
+    /// Shared by the matched start and Combinations batches so both resolve names identically. A
+    /// name that cannot be loaded is reported rather than skipped quietly: a batch silently running
+    /// on four layouts instead of five is a hard thing to notice afterwards, and it unbalances
+    /// every paired comparison built on it.
+    /// </summary>
+    private List<SpawnLayout> LoadNamedSpawnLayouts(SwarmType? expectedType = null)
+    {
+        List<SpawnLayout> layouts = new List<SpawnLayout>();
+        if (reuseSpawnLayouts == null) return layouts;
+
+        foreach (string name in reuseSpawnLayouts)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            string path = Path.Combine(SpawnLayout.DefaultFolder(saveFolder), name.Trim() + ".json");
+            SpawnLayout loaded = SpawnLayout.Load(path);
+
+            if (loaded == null)
+            {
+                Debug.LogError($"[SimRecorder] Could not load spawn layout '{name}' from {path}.");
+                continue;
+            }
+
+            // Each motion type spawns in its own area, so a layout captured for one type places
+            // agents where a different type never starts. It still runs, which is exactly why this
+            // has to be said out loud rather than left to be noticed in the data.
+            if (expectedType.HasValue && !string.IsNullOrEmpty(loaded.swarmType) &&
+                !loaded.swarmType.Equals(expectedType.Value.ToString(),
+                                         System.StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.LogWarning($"[SimRecorder] Layout '{loaded.layoutId}' was captured for " +
+                                 $"{loaded.swarmType} in '{loaded.spawnAreaName}', but this batch " +
+                                 $"records {expectedType.Value}, which spawns somewhere else. The " +
+                                 $"agents will start at the {loaded.swarmType} positions. Capture " +
+                                 $"layouts for {expectedType.Value} instead unless that is deliberate.");
+            }
+
+            layouts.Add(loaded);
+            Debug.Log($"[SimRecorder] Reusing layout {loaded} from {path}");
+        }
+
+        return layouts;
+    }
+
+    /// <summary>
+    /// Generates fresh spawn layouts for the motion type currently selected, and saves them.
+    ///
+    /// Used when a Combinations batch is set to run on layouts but none are named. Generating is
+    /// the right thing here: the new layouts are shared by every condition inside this batch, so
+    /// the batch is internally paired. What they will not do is line up with layouts from an
+    /// earlier batch, which is why it is logged rather than done quietly.
+    /// </summary>
+    private IEnumerator CaptureFreshLayouts(string timestampFolder, List<SpawnLayout> into)
+    {
+        int wanted = Mathf.Max(1, matchedStartLayouts);
+
+        for (int l = 0; l < wanted; l++)
+        {
+            uiController.ResetScene();
+            yield return null;   // let the spawn settle before snapshotting it
+
+            SpawnLayout layout = uiController.CaptureSpawnLayout($"{timestampFolder}_layout_{l:D2}");
+            into.Add(layout);
+
+            if (saveSpawnLayouts)
+            {
+                string path = Path.Combine(SpawnLayout.DefaultFolder(saveFolder), layout.layoutId + ".json");
+                layout.Save(path);
+                Debug.Log($"[SimRecorder] Captured {layout}, fingerprint {layout.Fingerprint()} -> {path}");
+            }
+        }
+    }
+
     private IEnumerator MatchedStartBatchRecordCoroutine()
     {
         isRecording = true;
@@ -768,18 +1157,7 @@ public class SimRecorder : MonoBehaviour
         // Either load the layouts named in the Inspector, or generate fresh ones.
         if (reuseSpawnLayouts != null && reuseSpawnLayouts.Count > 0)
         {
-            foreach (string name in reuseSpawnLayouts)
-            {
-                if (string.IsNullOrWhiteSpace(name)) continue;
-
-                string path = Path.Combine(SpawnLayout.DefaultFolder(saveFolder), name.Trim() + ".json");
-                SpawnLayout loaded = SpawnLayout.Load(path);
-                if (loaded != null)
-                {
-                    layouts.Add(loaded);
-                    Debug.Log($"[SimRecorder] Reusing layout {loaded} from {path}");
-                }
-            }
+            layouts.AddRange(LoadNamedSpawnLayouts(CurrentSwarmType));
 
             if (layouts.Count == 0)
             {
@@ -993,7 +1371,7 @@ public class SimRecorder : MonoBehaviour
         isObstacleSpawnBatchMode = false;
         isSingleParameterBatchMode = false;
         isSwarmTypeBatchMode = false;
-        hideOverlayText = true;
+        hideOverlayText = !showRecordingOverlay;
 
         if (swarmManager == null)
         {
@@ -1097,7 +1475,7 @@ public class SimRecorder : MonoBehaviour
     private IEnumerator CombinationsRecordCoroutine()
     {
         isRecording = true;
-        hideOverlayText = true;
+        hideOverlayText = !showRecordingOverlay;
         isObstacleBatchMode = false;
         isObstacleSpawnBatchMode = false;
         isSingleParameterBatchMode = false;
@@ -1142,6 +1520,51 @@ public class SimRecorder : MonoBehaviour
             yield break;
         }
 
+        // Spawn layouts, when this batch is to be analysable as a matched start one. A null entry
+        // means "fresh random spawn", which is the original behaviour and keeps one code path below.
+        List<SpawnLayout> layouts = new List<SpawnLayout> { null };
+
+        if (combinationsUseSpawnLayouts)
+        {
+            SwarmType layoutType = combinationSwarmTypes[0];
+
+            if (combinationSwarmTypes.Count > 1)
+            {
+                Debug.LogWarning($"[SimRecorder] This batch sweeps {combinationSwarmTypes.Count} motion " +
+                                 $"types, but each type spawns in its own area and one layout set cannot " +
+                                 $"suit them all. Layouts will be handled as {layoutType}. Record one " +
+                                 $"motion type per layout batch if that matters.");
+            }
+
+            layouts = LoadNamedSpawnLayouts(layoutType);
+
+            if (layouts.Count == 0)
+            {
+                // Nothing named: generate a set for this motion type. They are shared by every
+                // condition in this batch, so it is internally paired — it just will not line up
+                // with any earlier batch's layouts.
+                Debug.Log($"[SimRecorder] No layouts named in 'Reuse Spawn Layouts'. Capturing " +
+                          $"{Mathf.Max(1, matchedStartLayouts)} fresh ones for {layoutType}. These will " +
+                          $"NOT match layouts from earlier batches — name them in the Inspector to reuse.");
+
+                uiController.SetSwarmType(layoutType);
+                currentSwarmTypeDisplay = layoutType;
+                yield return CaptureFreshLayouts(timestampFolder, layouts);
+            }
+
+            if (layouts.Count == 0)
+            {
+                Debug.LogError("[SimRecorder] Could not obtain any spawn layouts; aborting.");
+                uiController.showUI = true;
+                isRecording = false;
+                hideOverlayText = false;
+                yield break;
+            }
+
+            Debug.Log($"[SimRecorder] Combinations will run every combination across {layouts.Count} " +
+                      $"spawn layouts, so the batch can be analysed by matched_start.py.");
+        }
+
         int combinationIndex = 0;
 
         // Upper bound on the number of clips (duplicate combinations are skipped as we go).
@@ -1150,6 +1573,7 @@ public class SimRecorder : MonoBehaviour
         {
             plannedCombinations += GetCombinationParam1ValuesForType(plannedType).Length * combinationParam2Values.Length * combinationParam3Values.Length;
         }
+        plannedCombinations *= layouts.Count;
 
         Debug.Log($"[SimRecorder] Combinations batch starting — up to {plannedCombinations} clips across types: {string.Join(", ", combinationSwarmTypes)}.");
 
@@ -1188,88 +1612,118 @@ public class SimRecorder : MonoBehaviour
                             continue;
                         }
 
-                        Debug.Log($"[SimRecorder] Recording {combinationIndex + 1}/{plannedCombinations} — {combinationLabel}");
-
-                        uiController.ResetScene();
-                        uiController.SetMotion(true);
-
-                        // Apply this motion type's wall rules, then settle un-recorded before capture starts.
-                        yield return PrepareRecordingForMotionType();
-
-                        string fileName = $"type_{swarmType.ToString().ToLower()}_{combinationParameter1.ToString().ToLower()}_{currentParam1:F2}_{combinationParameter2.ToString().ToLower()}_{currentParam2:F2}_{combinationParameter3.ToString().ToLower()}_{currentParam3:F2}";
-                        fileName = SanitizeFileName(fileName);
-
-                        SimulationConfig config = new SimulationConfig
+                        foreach (SpawnLayout layout in layouts)
                         {
-                            fileName = fileName,
-                            variedParameter = paramFolderName,
-                            variedParameterValue = combinationIndex,
-                            parameter1 = "SwarmType",
-                            parameter1Value = typeIndex,
-                            parameter2 = combinationParameter1.ToString(),
-                            parameter2Value = currentParam1,
-                            parameter3 = combinationParameter2.ToString(),
-                            parameter3Value = currentParam2,
-                            swarmType = swarmType.ToString(),
-                            obstacleName = swarmManager.centralObstacle != null ? swarmManager.centralObstacle.name : null,
-                            perceptionRadius = swarmManager.perceptionRadius,
-                            cohesion = swarmManager.cohesionIntensity,
-                            separation = swarmManager.separationIntensity,
-                            alignment = swarmManager.alignmentIntensity,
-                            friction = swarmManager.frictionIntensity,
-                            randomMovement = swarmManager.randomMovementIntensity,
-                            overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
-                            safetyDistance = swarmManager.safetyDistance,
-                            envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
-                            obstacleRadius = swarmManager.obstacleAvoidanceRadius,
-                            maxSpeed = swarmManager.maxSpeed,
-                            numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0
-                        };
+                            Debug.Log($"[SimRecorder] Recording {combinationIndex + 1}/{plannedCombinations} — {combinationLabel}" +
+                                      (layout != null ? $" | layout {layout.layoutId}" : ""));
 
-                        simulations.Add(config);
+                            // Either the fixed arrangement this clip must share with its reference, or a
+                            // fresh random spawn when layouts are not in use.
+                            if (layout != null)
+                            {
+                                activeSpawnLayoutId = layout.layoutId;
+                                activeSpawnLayoutFingerprint = layout.Fingerprint();
+                                uiController.SpawnFromLayout(layout);
+                            }
+                            else
+                            {
+                                activeSpawnLayoutId = null;
+                                activeSpawnLayoutFingerprint = null;
+                                uiController.ResetScene();
+                            }
+
+                            uiController.SetMotion(true);
+
+                            // Apply this motion type's wall rules, then settle un-recorded before capture starts.
+                            yield return PrepareRecordingForMotionType();
+
+                            string fileName = $"type_{swarmType.ToString().ToLower()}_{combinationParameter1.ToString().ToLower()}_{currentParam1:F2}_{combinationParameter2.ToString().ToLower()}_{currentParam2:F2}_{combinationParameter3.ToString().ToLower()}_{currentParam3:F2}";
+
+                            // Without the layout in the name every layout of a combination would write to
+                            // the same file, and only the last would survive.
+                            if (layout != null) fileName += $"_{layout.layoutId}";
+
+                            fileName = SanitizeFileName(fileName);
+
+                            SimulationConfig config = new SimulationConfig
+                            {
+                                fileName = fileName,
+                                variedParameter = paramFolderName,
+                                variedParameterValue = combinationIndex,
+                                parameter1 = "SwarmType",
+                                parameter1Value = typeIndex,
+                                parameter2 = combinationParameter1.ToString(),
+                                parameter2Value = currentParam1,
+                                parameter3 = combinationParameter2.ToString(),
+                                parameter3Value = currentParam2,
+                                swarmType = swarmType.ToString(),
+                                spawnLayoutId = layout != null ? layout.layoutId : null,
+                                spawnLayoutFingerprint = layout != null ? layout.Fingerprint() : null,
+                                obstacleName = swarmManager.centralObstacle != null ? swarmManager.centralObstacle.name : null,
+                                perceptionRadius = swarmManager.perceptionRadius,
+                                cohesion = swarmManager.cohesionIntensity,
+                                separation = swarmManager.separationIntensity,
+                                alignment = swarmManager.alignmentIntensity,
+                                friction = swarmManager.frictionIntensity,
+                                randomMovement = swarmManager.randomMovementIntensity,
+                                overlapAvoidance = swarmManager.overlappingAvoidanceIntensity,
+                                safetyDistance = swarmManager.safetyDistance,
+                                envAvoidance = swarmManager.envObstacleAvoidanceIntensity,
+                                obstacleRadius = swarmManager.obstacleAvoidanceRadius,
+                                maxSpeed = swarmManager.maxSpeed,
+                                numAgents = swarmManager.agents != null ? swarmManager.agents.Length : 0,
+                                requestedAgents = uiController.RequestedAgentCount,
+                                agentSpawnShortfall = uiController.AgentSpawnShortfall
+                            };
+
+                            simulations.Add(config);
 
 #if UNITY_EDITOR
-                        var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
-                        var recorderController = new RecorderController(controllerSettings);
+                            var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+                            var recorderController = new RecorderController(controllerSettings);
 
-                        var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
-                        videoRecorder.name = "Combinations Recorder";
-                        videoRecorder.Enabled = true;
-                        videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
-                        videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
+                            var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+                            videoRecorder.name = "Combinations Recorder";
+                            videoRecorder.Enabled = true;
+                            videoRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+                            videoRecorder.OutputFile = Path.Combine(targetFolderPath, fileName);
 
-                        videoRecorder.ImageInputSettings = new GameViewInputSettings
-                        {
-                            OutputWidth = outputWidth,
-                            OutputHeight = outputHeight
-                        };
+                            videoRecorder.ImageInputSettings = new GameViewInputSettings
+                            {
+                                OutputWidth = outputWidth,
+                                OutputHeight = outputHeight
+                            };
 
-                        videoRecorder.AudioInputSettings.PreserveAudio = false;
+                            videoRecorder.AudioInputSettings.PreserveAudio = false;
 
-                        controllerSettings.AddRecorderSettings(videoRecorder);
-                        controllerSettings.SetRecordModeToManual();
-                        controllerSettings.FrameRate = recordingFrameRate;
+                            controllerSettings.AddRecorderSettings(videoRecorder);
+                            controllerSettings.SetRecordModeToManual();
+                            controllerSettings.FrameRate = recordingFrameRate;
 
-                        recorderController.PrepareRecording();
-                        recorderController.StartRecording();
+                            recorderController.PrepareRecording();
+                            recorderController.StartRecording();
 #else
-                        Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
+                            Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                        yield return RunRecordingWindow(targetFolderPath, fileName);
-                        ApplyRecordingOutcome(config);
+                            yield return RunRecordingWindow(targetFolderPath, fileName);
+                            ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
-                        recorderController.StopRecording();
+                            recorderController.StopRecording();
 #endif
 
-                        uiController.SetMotion(false);
-                        Debug.Log($"[SimRecorder] Saved {swarmType} clip {combinationIndex + 1}/{plannedCombinations} ({lastEndReason}, {lastRecordedDuration:F2}s) → {fileName}.mp4");
-                        combinationIndex++;
+                            uiController.SetMotion(false);
+                            Debug.Log($"[SimRecorder] Saved {swarmType} clip {combinationIndex + 1}/{plannedCombinations} ({lastEndReason}, {lastRecordedDuration:F2}s) → {fileName}.mp4");
+                            combinationIndex++;
+                        }
                     }
                 }
             }
         }
+
+        activeSpawnLayoutId = null;
+        activeSpawnLayoutFingerprint = null;
 
         BatchConfig batchConfig = new BatchConfig
         {
