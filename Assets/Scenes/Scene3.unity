@@ -281,12 +281,12 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 233464110}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0caaee080601f42caa84192597b8699d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VideoGridManager
-  folderPath: Assets/SimulationRecordings/Combinations/20260825_140052
+  folderPath: Assets/SimulationRecordings/Combinations/20260908_013309_flocking_40
   gridContainer: {fileID: 1219487762}
   topMainLabel: {fileID: 167985617}
   leftMainLabel: {fileID: 1289019110}
@@ -300,8 +300,8 @@ MonoBehaviour:
   - {fileID: 512825653}
   - {fileID: 385865648}
   - {fileID: 1362059079}
-  rows: 8
-  cols: 8
+  rows: 10
+  cols: 10
   renderWidth: 640
   renderHeight: 360
 --- !u!4 &233464112
@@ -326,24 +326,24 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 233464110}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f5d7875eb84d842deaa6e9248b0235fd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DispersionGridManager
   folderPath: Assets/SimulationRecordings/Combinations/20260902_131813_3
   randomnessRows:
-  - 80
-  - 40
+  - 0
+  - 0
   - 0
   perceptionValues:
   - 2.5
   - 3
   - 3.5
   - 4
-  maxSpeed: 3
+  maxSpeed: 1.5
   spawnLayoutId: 
-  swarmType: dispersion
+  swarmType: flocking
   gridContainer: {fileID: 430031617}
   topMainLabel: {fileID: 167985617}
   leftMainLabel: {fileID: 512825653}

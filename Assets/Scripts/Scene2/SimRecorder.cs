@@ -45,7 +45,20 @@ public enum RecordingEndCondition
     /// is not dependable with randomness: the hull keeps wobbling by several u²/s after the swarm
     /// has stopped spreading, so the slope never stays quiet and the clip would run to the timeout.
     /// </summary>
-    SpreadSettled
+    SpreadSettled,
+    /// <summary>
+    /// Stop once the swarm has broken into, or merged down to, a target number of groups.
+    ///
+    /// Groups are the connected components of the perception graph: two agents are joined when one
+    /// is inside the other's perception radius, and a chain of such links forms one group. An agent
+    /// that can see nobody is a group of one, so a swarm of 40 agents that all sit out of range of
+    /// each other counts as 40 groups.
+    ///
+    /// Which direction the test runs is taken from the count when recording starts, so the same
+    /// setting works for a flock coalescing (many groups down to a few) and for a swarm fragmenting
+    /// (one group up to several).
+    /// </summary>
+    ClusterCountReached
 }
 
 /// <summary>What <c>densityTargetRatio</c> is a ratio of.</summary>
@@ -116,6 +129,12 @@ public class SimRecorder : MonoBehaviour
         [Tooltip("Seconds the end condition must hold continuously before the recording stops. Stops an oscillating swarm ending a clip on a momentary spike. 0 fires on the first crossing.")]
         public float endConditionDwellTime = 0.5f;
 
+        [Tooltip("ClusterCountReached: how many groups to stop at. Direction is inferred from the count when recording starts, so 1 ends a flock once it has merged into a single group, and 2 ends a swarm once it has split in two.")]
+        public int clusterCountTarget = 2;
+
+        [Tooltip("ClusterCountReached: smallest group that counts. 1 treats a lone agent as its own group, which is how fragmentation is defined in the paper. 2 ignores strays and counts only real groups.")]
+        public int minClusterSize = 1;
+
         [Tooltip("SpreadSettled: slope limit as a fraction of the largest value seen so far, per second. 0.02 means the spread must be changing by under 2% of its peak per second.")]
         public float settleTolerance = 0.02f;
 
@@ -172,6 +191,10 @@ public class SimRecorder : MonoBehaviour
         public string densityBaselineSource;         // "recording start" or the no-randomness reference used
         public float densityReferenceValue;          // settled value of the zero-randomness twin, 0 when unused
         public float absoluteHullAreaTarget;         // 0 when the condition was not AbsoluteHullAreaReached
+        public int clusterCountTarget;               // 0 when the condition was not ClusterCountReached
+        public int clusterCountAtStart;              // groups when recording began
+        public int clusterCountAtEnd;                // groups when the clip finished
+        public int minClusterSize;                   // smallest group counted
         public float endConditionDwellTime;          // seconds the rule had to hold before firing
         public float recordedDuration;               // seconds of motion recorded
         public float maxRecordingTime;               // duration cap that applied to this sim
@@ -217,7 +240,7 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 2f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 0f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 95f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
         // Densification shrinks from where it started, so the ratio is against RecordingStart and
         // must be clearly below 1. A value of 1 would be true on the first frame.
         new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.4f, recordingEndDelay = 3f },
@@ -269,23 +292,23 @@ public class SimRecorder : MonoBehaviour
 
     public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f, 80f };
+    public float[] combinationParam1Values = new float[] { 0.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
-    public float[] combinationParam2Values = new float[] { 0.15f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f }; // 
+    public float[] combinationParam2Values = new float[] { 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
     // public float[] combinationParam2Values = new float[] { 0.15f };
 
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
-    public float[] combinationParam3Values = new float[] { 1.5f };
+    public float[] combinationParam3Values = new float[] { 1.5f, 3.0f };
 
     [Header("Matched Start Batch (single parameter, identical spawns)")]
     [Tooltip("How many different starting layouts to generate. Each one is swept through every parameter value, so the comparison between values is paired and spawn luck cancels out.")]
-    public int matchedStartLayouts = 5;
+    public int matchedStartLayouts = 40;
 
     [Tooltip("Save each layout as JSON under SimulationRecordings/SpawnLayouts so a later batch can reuse the exact same starts.")]
     public bool saveSpawnLayouts = true;
 
     [Tooltip("Optional. Names of saved layouts to load instead of generating fresh ones, e.g. layout_00. Leave empty to generate.")]
-    public List<string> reuseSpawnLayouts = new List<string> { "20260825_140052_layout_00" };
+    public List<string> reuseSpawnLayouts = new List<string> { };
 
     [Header("Single Parameter Batch")]
     public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.PerceptionRad;
@@ -328,6 +351,11 @@ public class SimRecorder : MonoBehaviour
     // Word at the front of the on-screen line: "Recording" while the window is open, "Video Ended"
     // for the closing frames, so the mp4 says for itself where it stopped.
     private string overlayStatus = "Recording";
+
+    private int lastClusterCountAtStart;
+    private int lastClusterCountAtEnd;
+    private int lastClusterCountTarget;
+    private int lastMinClusterSize = 1;
 
     // Settled spread of each zero-randomness run, keyed by layout, perception radius and max speed.
     // Filled as those runs record, so a randomised run later in the same batch can be measured
@@ -494,6 +522,29 @@ public class SimRecorder : MonoBehaviour
             : monitor.CurrentValue >= target;
     }
 
+    // Reused so counting the groups every frame allocates nothing.
+    private readonly List<int> clusterSizeBuffer = new List<int>();
+
+    /// <summary>
+    /// Number of groups the swarm is currently in.
+    ///
+    /// Groups come from <see cref="SwarmClusterMetrics"/>, which joins two agents when one is inside
+    /// the other's perception radius and takes the connected components of that graph. The same
+    /// edge test the agents themselves use to pick neighbours, so the count reflects what the swarm
+    /// can actually communicate across.
+    /// </summary>
+    private int CountClusters(int minClusterSize)
+    {
+        if (swarmManager == null) return 0;
+
+        SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
+                                         clusterSizeBuffer, swarmManager.AgentColliders);
+
+        return minClusterSize <= 1
+            ? clusterSizeBuffer.Count
+            : SwarmClusterMetrics.CountAtLeast(clusterSizeBuffer, minClusterSize);
+    }
+
     /// <summary>Points the monitor at this motion type's metric and takes the reference measurement.</summary>
     private void CaptureDensityBaseline(MotionTypeRecordingSettings settings)
     {
@@ -536,6 +587,11 @@ public class SimRecorder : MonoBehaviour
                     break;
                 case RecordingEndCondition.AbsoluteHullAreaReached:
                     rule = $"AbsoluteHullAreaReached@{entry.absoluteHullAreaTarget:F0}u2";
+                    break;
+
+                case RecordingEndCondition.ClusterCountReached:
+                    rule = $"ClusterCountReached@{entry.clusterCountTarget} groups of "
+                         + $"{entry.minClusterSize}+";
                     break;
 
                 case RecordingEndCondition.SpreadSettled:
@@ -618,6 +674,43 @@ public class SimRecorder : MonoBehaviour
         // since its settled value is what every randomised run is then judged against.
         bool referenceMustSettle = wantsDensityCondition && isReferenceRun &&
                                    settings.densityRatioBaseline == DensityRatioBaseline.NoRandomnessReference;
+
+        // Cluster rule: count the groups now so the direction of the test is known. A flock starts
+        // scattered and merges, a swarm starts whole and splits, and the same setting has to serve
+        // both without the user restating which way it goes.
+        bool wantsClusterCondition = settings.endCondition == RecordingEndCondition.ClusterCountReached;
+        bool clusterConditionEnabled = wantsClusterCondition && swarmManager != null;
+        int clusterBaseline = 0;
+        bool clusterMerging = false;
+
+        if (clusterConditionEnabled)
+        {
+            clusterBaseline = CountClusters(settings.minClusterSize);
+            clusterMerging = settings.clusterCountTarget <= clusterBaseline;
+
+            if (settings.clusterCountTarget == clusterBaseline)
+            {
+                clusterConditionEnabled = false;
+                Debug.LogError(
+                    $"[SimRecorder] {swarmType}: clusterCountTarget is {settings.clusterCountTarget}, " +
+                    $"which is already the number of groups at recording start. The rule would fire " +
+                    $"on the first frame. Pick a target the swarm has to reach — lower to end when it " +
+                    $"merges, higher to end when it splits. Recording to the {maxTime:F2}s duration.");
+            }
+            else
+            {
+                Debug.Log($"[SimRecorder] {swarmType}: {clusterBaseline} groups at start, ending at " +
+                          $"{settings.clusterCountTarget} " +
+                          $"({(clusterMerging ? "merging" : "splitting")}, groups of " +
+                          $"{settings.minClusterSize}+ agents).");
+            }
+        }
+
+        if (wantsClusterCondition && swarmManager == null)
+        {
+            Debug.LogWarning($"[SimRecorder] {swarmType} is set to ClusterCountReached but there is no " +
+                             $"swarm manager; falling back to the {maxTime:F2}s duration.");
+        }
 
         bool wantsSettle = settings.endCondition == RecordingEndCondition.SpreadSettled || referenceMustSettle;
         bool settleEnabled = wantsSettle && densityMonitor != null;
@@ -756,6 +849,23 @@ public class SimRecorder : MonoBehaviour
                 reason = "spread-settled";
                 detail = $"{densityMonitor.MetricName} stopped changing — {settleDetector.Describe()}";
             }
+            else if (clusterConditionEnabled)
+            {
+                int groups = CountClusters(settings.minClusterSize);
+                bool met = clusterMerging
+                    ? groups <= settings.clusterCountTarget
+                    : groups >= settings.clusterCountTarget;
+
+                if (met)
+                {
+                    conditionMet = true;
+                    reason = "cluster-count";
+                    detail = $"{groups} groups " +
+                             $"({(clusterMerging ? "merged down from" : "split up from")} {clusterBaseline}) " +
+                             $"reached target {settings.clusterCountTarget} — " +
+                             $"{SwarmClusterMetrics.Describe(clusterSizeBuffer)}";
+                }
+            }
             else if (goalConditionEnabled && goalArea.IsPercentReached(settings.goalAreaAgentPercent))
             {
                 conditionMet = true;
@@ -852,6 +962,13 @@ public class SimRecorder : MonoBehaviour
             StoreReferenceValue(perceptionRadius, runMaxSpeed);
         }
 
+        // Counted for every run, not only when the cluster rule is in use: it is cheap and it makes
+        // every clip's config say how fragmented the swarm ended up.
+        lastClusterCountAtStart = clusterBaseline;
+        lastClusterCountAtEnd = CountClusters(settings.minClusterSize);
+        lastMinClusterSize = settings.minClusterSize;
+        lastClusterCountTarget = wantsClusterCondition ? settings.clusterCountTarget : 0;
+
         lastAgentsInsideGoalArea = goalArea != null ? goalArea.AgentsInside : 0;
         lastPercentInsideGoalArea = goalArea != null ? goalArea.PercentInside : 0f;
         lastDensityMetricName = densityMonitor != null ? densityMonitor.MetricName : null;
@@ -932,6 +1049,10 @@ public class SimRecorder : MonoBehaviour
         config.densityBaselineSource = lastDensityBaselineSource;
         config.densityReferenceValue = resolvedReferenceValue;
         config.absoluteHullAreaTarget = lastAbsoluteAreaTarget;
+        config.clusterCountTarget = lastClusterCountTarget;
+        config.clusterCountAtStart = lastClusterCountAtStart;
+        config.clusterCountAtEnd = lastClusterCountAtEnd;
+        config.minClusterSize = lastMinClusterSize;
         config.endConditionDwellTime = lastDwellTime;
 
         if (uiController != null)
@@ -1011,8 +1132,15 @@ public class SimRecorder : MonoBehaviour
                 ? $"{overlayGoalArea.AgentsEverInside}/{overlayGoalArea.TrackedAgents}"
                 : "-";
 
-            string displayText = $"{overlayStatus} | Random: {random:F0} | Perception: {perception:F2} " +
-                                 $"| Agents reached: {reached}";
+            // Groups the swarm is currently in, by the same perception-graph rule the cluster end
+            // condition uses, so the clip shows what that rule is acting on.
+            MotionTypeRecordingSettings overlaySettings = GetSettingsFor(CurrentSwarmType);
+            string groups = swarmManager != null
+                ? $"{CountClusters(overlaySettings.minClusterSize)}"
+                : "-";
+
+            string displayText = $"{overlayStatus} | Perception: {perception:F2} " +
+                                 $"| Groups: {groups} | Agents reached: {reached}";
 
             GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
             GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);

@@ -6,11 +6,13 @@ using UnityEngine;
 public class SimRecorderEditor : Editor
 {
     private static readonly string[] EndConditionLabels =
-        { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled" };
+        { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled",
+          "Cluster Count" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
     private const int AbsoluteHullAreaIndex = 3;
     private const int SpreadSettledIndex = 4;
+    private const int ClusterCountIndex = 5;
 
     /// <summary>Index of DensityRatioBaseline.NoRandomnessReference in that enum.</summary>
     private const int NoRandomnessReferenceIndex = 1;
@@ -50,6 +52,8 @@ public class SimRecorderEditor : Editor
                 SerializedProperty densityTargetRatio = entry.FindPropertyRelative("densityTargetRatio");
                 SerializedProperty absoluteArea = entry.FindPropertyRelative("absoluteHullAreaTarget");
                 SerializedProperty dwell = entry.FindPropertyRelative("endConditionDwellTime");
+                SerializedProperty clusterTarget = entry.FindPropertyRelative("clusterCountTarget");
+                SerializedProperty minClusterSize = entry.FindPropertyRelative("minClusterSize");
                 SerializedProperty settleTolerance = entry.FindPropertyRelative("settleTolerance");
                 SerializedProperty settleHoldTime = entry.FindPropertyRelative("settleHoldTime");
                 SerializedProperty endDelay = entry.FindPropertyRelative("recordingEndDelay");
@@ -107,6 +111,24 @@ public class SimRecorderEditor : Editor
                 using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != AbsoluteHullAreaIndex))
                 {
                     EditorGUILayout.PropertyField(absoluteArea, new GUIContent("Target Hull Area (u2)"));
+                }
+
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != ClusterCountIndex))
+                {
+                    EditorGUILayout.PropertyField(clusterTarget, new GUIContent("Target Group Count"));
+                    EditorGUILayout.IntSlider(minClusterSize, 1, 10, new GUIContent("Smallest Group Counted"));
+                }
+
+                if (endCondition.enumValueIndex == ClusterCountIndex)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Groups are the connected components of the perception graph: two agents are " +
+                        "joined when one is inside the other's perception radius. An agent that sees " +
+                        "nobody is a group of one, so 40 scattered agents count as 40 groups.\n\n" +
+                        "The direction is taken from the count when recording starts, so a target " +
+                        "below it ends the clip when the swarm merges and a target above it ends the " +
+                        "clip when it splits. A target equal to the starting count is rejected.",
+                        MessageType.Info);
                 }
 
                 // Also used by the no-randomness reference run under the reference baseline, so it
