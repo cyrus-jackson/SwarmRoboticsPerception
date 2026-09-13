@@ -2696,6 +2696,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1427614508}
   - component: {fileID: 1427614509}
+  - component: {fileID: 1427614510}
   m_Layer: 0
   m_Name: Background
   m_TagString: Untagged
@@ -2767,6 +2768,27 @@ MonoBehaviour:
   dispersionGoalArea: {fileID: 564621125}
   hideInactiveGoalAreas: 0
   showUI: 1
+--- !u!114 &1427614510
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1427614507}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cf74586210b4246419bb90f8c8b8a766, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ClusterPanel
+  toggleKey: 34
+  visible: 0
+  panelWidth: 330
+  method: 1
+  eps: 2
+  minPoints: 3
+  spacingMultiple: 4
+  autoEpsK: 3
+  showOutlines: 1
 --- !u!1 &1658453497
 GameObject:
   m_ObjectHideFlags: 0
