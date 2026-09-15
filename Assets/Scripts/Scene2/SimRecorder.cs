@@ -251,15 +251,15 @@ public class SimRecorder : MonoBehaviour
         new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 4f }
     };
 
-    [Tooltip("Draw the parameter and hull area line in the top left of the recorded video. The Combinations and Current Settings batches used to force this off; this switch now controls every batch type.")]
-    public bool showRecordingOverlay = true;
+    [Tooltip("Draw the parameter and hull area line in the top left of the recorded video. ")]
+    public bool showRecordingOverlay = false;
 
     [Tooltip("Seconds to keep recording with the line reading 'Video Ended', so the last frames of the clip say where it stopped. Added to the clip length. 0 skips it, which means the marker lasts a single frame and is invisible on playback.")]
     public float videoEndedMarkerSeconds = 1f;
 
     [Header("End Of Video Overlay")]
     [Tooltip("Show a full screen black card with centred text for the last moments of every recording.")]
-    public bool showVideoFinishedOverlay = false;
+    public bool showVideoFinishedOverlay = true;
     [Tooltip("Text shown in the centre of the black card.")]
     public string videoFinishedText = "Video Finished";
     [Tooltip("How long the black card stays on screen. Appended after the motion, so total clip length is motion + this.")]
@@ -294,7 +294,7 @@ public class SimRecorder : MonoBehaviour
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     public float[] combinationParam1Values = new float[] { 0.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
-    public float[] combinationParam2Values = new float[] { 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
+    public float[] combinationParam2Values = new float[] { 1.5f, 3.5f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
     // public float[] combinationParam2Values = new float[] { 0.15f };
 
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
@@ -302,7 +302,7 @@ public class SimRecorder : MonoBehaviour
 
     [Header("Matched Start Batch (single parameter, identical spawns)")]
     [Tooltip("How many different starting layouts to generate. Each one is swept through every parameter value, so the comparison between values is paired and spawn luck cancels out.")]
-    public int matchedStartLayouts = 40;
+    public int matchedStartLayouts = 50;
 
     [Tooltip("Save each layout as JSON under SimulationRecordings/SpawnLayouts so a later batch can reuse the exact same starts.")]
     public bool saveSpawnLayouts = true;
