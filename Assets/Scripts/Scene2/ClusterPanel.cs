@@ -53,7 +53,14 @@ public class ClusterPanel : MonoBehaviour
     [Header("Display")]
     public bool showOutlines = true;
 
+    [Tooltip("Hide this panel, and the [T] hint, while SimRecorder is capturing with its overlay switched off. The hint is an instruction to whoever is at the keyboard, so it has no business being burnt into a recording. Cluster outlines are drawn with LineRenderers and are unaffected, so they still appear in the video.")]
+    public bool hideWhileRecording = true;
+
+    [Tooltip("Draw the small [T] clusters hint in the top right while the panel is closed. Off by default: the panel draws nothing at all until T is pressed, so it cannot appear in a recording or over the UI by accident. Turn it on if you want the panel to be discoverable to someone who does not know the key.")]
+    public bool showHint = false;
+
     private SwarmManager swarmManager;
+    private SimRecorder recorder;
     private ClusterVisualizer visualizer;
 
     private readonly List<Vector2> positions = new List<Vector2>();
@@ -184,12 +191,32 @@ public class ClusterPanel : MonoBehaviour
 
     // ------------------------------------------------------------------ panel
 
+    /// <summary>
+    /// Whether anything of this panel should be drawn this frame.
+    ///
+    /// Only the drawing is suppressed, not the clustering in <see cref="Update"/>: the outlines are
+    /// LineRenderers in the scene rather than IMGUI, so they keep working through a recording.
+    /// </summary>
+    private bool GuiSuppressed()
+    {
+        if (!hideWhileRecording) return false;
+
+        if (recorder == null) recorder = FindObjectOfType<SimRecorder>();
+        return recorder != null && recorder.OperatorOverlayHidden;
+    }
+
     private void OnGUI()
     {
+        if (GuiSuppressed()) return;
+
         if (!visible)
         {
-            // A one-line hint, so the panel is discoverable without cluttering anything.
-            GUI.Label(new Rect(Screen.width - 150, 6, 150, 20), $"[{toggleKey}] clusters");
+            // Closed: nothing is drawn unless the hint has been asked for. The panel is an
+            // analysis tool rather than part of the scene, so the default is to leave no trace.
+            if (showHint)
+            {
+                GUI.Label(new Rect(Screen.width - 150, 6, 150, 20), $"[{toggleKey}] clusters");
+            }
             return;
         }
 

@@ -106,7 +106,7 @@ public class UI : MonoBehaviour
 
     private float uiOverlapAvoid = 20.0f;
     private float uiSafetyDist = 0.2f;
-    private float uiEnvAvoid = 20.0f;
+    private float uiEnvAvoid = 3.0f;
 
     private float uiPerceptionRad = 0.2f;
     private float uiObstacleRad = 0.1f;

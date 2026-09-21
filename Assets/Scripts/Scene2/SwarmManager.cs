@@ -28,7 +28,7 @@ public class SwarmManager : MonoBehaviour
     public float safetyDistance = 1f; // sd
 
     [Header("Environmental Obstacle Avoidance")]
-    public float envObstacleAvoidanceIntensity = 20.0f;
+    public float envObstacleAvoidanceIntensity = 3.0f;
 
     [Header("Perception")]
     public float perceptionRadius = 1f;

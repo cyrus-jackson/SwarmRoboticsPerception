@@ -1,0 +1,74 @@
+Motions: 4
+Speed: 2 - confirmed 
+Perception: 2 - 2nd take
+Noise: 2 - No Noise and With Noise - 2nd take
+
+422*2 = 32 
+
+
+
+Flocking - 3 perception - 3 speed - Noise - A1 - layout 01 - 
+Flocking - 1.5 perception - 3 speed - Noise - Z1 - layout 01
+A1 and Z1
+Flocking - 3 perception - 3 speed - Noise - A2 - layout 02
+Dispersion - 3 perception - 3 speed - Noise - B1 - layout 01
+Dispersion - 3 perception - 3 speed - Noise - B2 - layout 02
+
+10 layouts = 320 videos
+
+Pairs: 32*31 = 992 Pairs - 496
+
+Participants: 100
+Number of Video Pairs Watched: 30 pairs
+
+992 / 30 = 33
+
+1 participant = 1 to 30 - A1 vs Z1
+2             = 31 to 60
+
+33 participant = 961 to 991 
+34            = 992 to 29 - A2 vs Z2
+A6 vs Z6 
+----- Counterbalanced -----
+
+1 pair has 2 videos
+A1 and B1 Videos - 1 participant
+A2 and B2 - 34 paricipant 
+A3 and B3 - 67 Paricipant
+
+X  Pool of A [1 to 10] - It always picks a random video. - layout 01
+
+10 layouts
+
+what is the count of participants?
+1
+2
+if 33 > A2
+
+Single Video: 
+50 paricipants
+10 Layouts
+5 paricipants will see 1 layout each
+1 layout - 5 participant
+
+
+
+
+
+
+
+
+
+
+
+
+496 - 
+4
+124
+
+
+
+
+1 par - 1 to 30
+2 did not finish 31 - 60 - 33 p
+3 - 61- 90

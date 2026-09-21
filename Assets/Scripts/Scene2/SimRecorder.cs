@@ -240,15 +240,10 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 0f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 95f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
-        // Densification shrinks from where it started, so the ratio is against RecordingStart and
-        // must be clearly below 1. A value of 1 would be true on the first frame.
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.4f, recordingEndDelay = 3f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.3f, recordingEndDelay = 3f },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration, goalAreaAgentPercent = 90f },
-        // Dispersion is judged against the no-randomness run from the same layout: 1.0 means the
-        // randomised swarm has spread as far as separation alone gets it, 1.2 means a fifth further.
-        // The reference run itself ends when its own spread settles, not on this ratio.
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 4f }
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 3f }
     };
 
     [Tooltip("Draw the parameter and hull area line in the top left of the recorded video. ")]
@@ -292,7 +287,7 @@ public class SimRecorder : MonoBehaviour
 
     public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
     public float[] combinationParam2Values = new float[] { 1.5f, 3.5f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
     // public float[] combinationParam2Values = new float[] { 0.15f };
@@ -302,7 +297,7 @@ public class SimRecorder : MonoBehaviour
 
     [Header("Matched Start Batch (single parameter, identical spawns)")]
     [Tooltip("How many different starting layouts to generate. Each one is swept through every parameter value, so the comparison between values is paired and spawn luck cancels out.")]
-    public int matchedStartLayouts = 50;
+    public int matchedStartLayouts = 15;
 
     [Tooltip("Save each layout as JSON under SimulationRecordings/SpawnLayouts so a later batch can reuse the exact same starts.")]
     public bool saveSpawnLayouts = true;
@@ -333,6 +328,19 @@ public class SimRecorder : MonoBehaviour
     private bool isSwarmTypeBatchMode = false;
     private bool hideOverlayText = false;
     private SwarmType currentSwarmTypeDisplay;
+
+    /// <summary>True while a clip is being captured, batch or single.</summary>
+    public bool IsRecording => isRecording;
+
+    /// <summary>
+    /// True when nothing that is only there for the operator should be drawn.
+    ///
+    /// <see cref="showRecordingOverlay"/> governs this recorder's own status line, but anything
+    /// else drawing IMGUI in the scene ends up in the video too, and a keyboard hint is no use to
+    /// a viewer watching a recording. Other panels read this rather than each inventing their own
+    /// rule, so one switch covers the frame.
+    /// </summary>
+    public bool OperatorOverlayHidden => isRecording && hideOverlayText;
 
     // Outcome of the most recent recording window.
     private float lastRecordedDuration;
@@ -1225,6 +1233,56 @@ public class SimRecorder : MonoBehaviour
     }
 
     /// <summary>
+    /// The named layouts that belong to one motion type.
+    ///
+    /// Each motion type spawns in its own area, so a batch sweeping several types needs a set per
+    /// type rather than one shared set. Layouts captured for a different type are skipped here
+    /// rather than warned about: when the batch covers several types a mismatch is the ordinary
+    /// case, not a mistake, and whatever is left over belongs to one of the other types.
+    /// </summary>
+    private List<SpawnLayout> LoadNamedSpawnLayoutsFor(SwarmType type)
+    {
+        List<SpawnLayout> matching = new List<SpawnLayout>();
+        if (reuseSpawnLayouts == null) return matching;
+
+        foreach (string name in reuseSpawnLayouts)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            string path = Path.Combine(SpawnLayout.DefaultFolder(saveFolder), name.Trim() + ".json");
+            SpawnLayout loaded = SpawnLayout.Load(path);
+
+            if (loaded == null)
+            {
+                Debug.LogError($"[SimRecorder] Could not load spawn layout '{name}' from {path}.");
+                continue;
+            }
+
+            // A layout saved before the motion type was recorded has nothing to match against.
+            // Taking it is better than discarding the only layouts an older project has, but it
+            // is worth saying, because it is the one route back to the old mixed-up behaviour.
+            if (string.IsNullOrEmpty(loaded.swarmType))
+            {
+                Debug.LogWarning($"[SimRecorder] Layout '{loaded.layoutId}' does not record which " +
+                                 $"motion type it was captured for, so it is being used for {type}. " +
+                                 $"Re-capture it if the agents start in the wrong place.");
+                matching.Add(loaded);
+                continue;
+            }
+
+            if (!loaded.swarmType.Equals(type.ToString(), System.StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            matching.Add(loaded);
+            Debug.Log($"[SimRecorder] Reusing layout {loaded} for {type} from {path}");
+        }
+
+        return matching;
+    }
+
+    /// <summary>
     /// Generates fresh spawn layouts for the motion type currently selected, and saves them.
     ///
     /// Used when a Combinations batch is set to run on layouts but none are named. Generating is
@@ -1648,49 +1706,66 @@ public class SimRecorder : MonoBehaviour
             yield break;
         }
 
-        // Spawn layouts, when this batch is to be analysable as a matched start one. A null entry
-        // means "fresh random spawn", which is the original behaviour and keeps one code path below.
-        List<SpawnLayout> layouts = new List<SpawnLayout> { null };
+        // Spawn layouts, one set per motion type. Each type spawns in its own area, so a single
+        // shared set would start every type from wherever the first type happens to spawn. A list
+        // holding one null entry means "fresh random spawn", which keeps one code path below.
+        Dictionary<SwarmType, List<SpawnLayout>> layoutsByType =
+            new Dictionary<SwarmType, List<SpawnLayout>>();
 
-        if (combinationsUseSpawnLayouts)
+        foreach (SwarmType layoutType in combinationSwarmTypes)
         {
-            SwarmType layoutType = combinationSwarmTypes[0];
+            if (layoutsByType.ContainsKey(layoutType)) continue;
 
-            if (combinationSwarmTypes.Count > 1)
+            if (!combinationsUseSpawnLayouts)
             {
-                Debug.LogWarning($"[SimRecorder] This batch sweeps {combinationSwarmTypes.Count} motion " +
-                                 $"types, but each type spawns in its own area and one layout set cannot " +
-                                 $"suit them all. Layouts will be handled as {layoutType}. Record one " +
-                                 $"motion type per layout batch if that matters.");
+                layoutsByType[layoutType] = new List<SpawnLayout> { null };
+                continue;
             }
 
-            layouts = LoadNamedSpawnLayouts(layoutType);
+            List<SpawnLayout> forType = LoadNamedSpawnLayoutsFor(layoutType);
 
-            if (layouts.Count == 0)
+            if (forType.Count == 0)
             {
-                // Nothing named: generate a set for this motion type. They are shared by every
-                // condition in this batch, so it is internally paired — it just will not line up
-                // with any earlier batch's layouts.
-                Debug.Log($"[SimRecorder] No layouts named in 'Reuse Spawn Layouts'. Capturing " +
-                          $"{Mathf.Max(1, matchedStartLayouts)} fresh ones for {layoutType}. These will " +
-                          $"NOT match layouts from earlier batches — name them in the Inspector to reuse.");
+                // Nothing named for this type: generate a set for it. They are shared by every
+                // condition of this type in this batch, so it is internally paired — it just will
+                // not line up with any earlier batch's layouts.
+                Debug.Log($"[SimRecorder] No spawn layouts named for {layoutType}. Capturing " +
+                          $"{Mathf.Max(1, matchedStartLayouts)} fresh ones in its own spawn area. " +
+                          $"These will NOT match layouts from earlier batches — name them in " +
+                          $"'Reuse Spawn Layouts' to reuse them.");
 
                 uiController.SetSwarmType(layoutType);
                 currentSwarmTypeDisplay = layoutType;
-                yield return CaptureFreshLayouts(timestampFolder, layouts);
+                yield return null;   // let the type switch take effect before spawning into it
+
+                // Per-type prefix, so the four sets in a four-type batch cannot overwrite each
+                // other and each name says which type it belongs to.
+                yield return CaptureFreshLayouts(
+                    $"{timestampFolder}_{layoutType.ToString().ToLower()}", forType);
             }
 
-            if (layouts.Count == 0)
+            if (forType.Count == 0)
             {
-                Debug.LogError("[SimRecorder] Could not obtain any spawn layouts; aborting.");
+                Debug.LogError($"[SimRecorder] Could not obtain any spawn layouts for {layoutType}; aborting.");
                 uiController.showUI = true;
                 isRecording = false;
                 hideOverlayText = false;
                 yield break;
             }
 
-            Debug.Log($"[SimRecorder] Combinations will run every combination across {layouts.Count} " +
-                      $"spawn layouts, so the batch can be analysed by matched_start.py.");
+            layoutsByType[layoutType] = forType;
+        }
+
+        if (combinationsUseSpawnLayouts)
+        {
+            foreach (KeyValuePair<SwarmType, List<SpawnLayout>> entry in layoutsByType)
+            {
+                Debug.Log($"[SimRecorder] {entry.Key}: {entry.Value.Count} spawn layouts " +
+                          $"({string.Join(", ", entry.Value.ConvertAll(l => l.layoutId))}).");
+            }
+
+            Debug.Log("[SimRecorder] Combinations will run every combination of a motion type across " +
+                      "that type's own layouts, so the batch can be analysed by matched_start.py.");
         }
 
         int combinationIndex = 0;
@@ -1699,9 +1774,12 @@ public class SimRecorder : MonoBehaviour
         int plannedCombinations = 0;
         foreach (SwarmType plannedType in combinationSwarmTypes)
         {
-            plannedCombinations += GetCombinationParam1ValuesForType(plannedType).Length * combinationParam2Values.Length * combinationParam3Values.Length;
+            int conditions = GetCombinationParam1ValuesForType(plannedType).Length * combinationParam2Values.Length * combinationParam3Values.Length;
+
+            // Layout counts can differ between types — one may have ten named while another had
+            // to capture fresh ones — so the total is summed per type rather than multiplied once.
+            plannedCombinations += conditions * layoutsByType[plannedType].Count;
         }
-        plannedCombinations *= layouts.Count;
 
         Debug.Log($"[SimRecorder] Combinations batch starting — up to {plannedCombinations} clips across types: {string.Join(", ", combinationSwarmTypes)}.");
 
@@ -1710,7 +1788,11 @@ public class SimRecorder : MonoBehaviour
             SwarmType swarmType = combinationSwarmTypes[typeIndex];
             float[] param1ValuesForType = GetCombinationParam1ValuesForType(swarmType);
 
-            Debug.Log($"[SimRecorder] === Motion type {typeIndex + 1}/{combinationSwarmTypes.Count}: {swarmType} ===");
+            // This type's own layouts, captured in this type's own spawn area.
+            List<SpawnLayout> layouts = layoutsByType[swarmType];
+
+            Debug.Log($"[SimRecorder] === Motion type {typeIndex + 1}/{combinationSwarmTypes.Count}: {swarmType} " +
+                      $"({layouts.Count} layout{(layouts.Count == 1 ? "" : "s")}) ===");
 
             for (int param1Index = 0; param1Index < param1ValuesForType.Length; param1Index++)
             {

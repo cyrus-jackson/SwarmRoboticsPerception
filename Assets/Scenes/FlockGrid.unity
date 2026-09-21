@@ -128,7 +128,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 363961735}
-  - component: {fileID: 363961734}
+  - component: {fileID: 363961736}
   m_Layer: 0
   m_Name: FlockGridManager
   m_TagString: Untagged
@@ -136,30 +136,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &363961734
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 363961733}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3785d7baffcf54ca487370162a11f847, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::FlockGridManager
-  maxSpeed: 3
-  perceptionRadius: 4
-  folderPath: Assets/SimulationRecordings/Combinations/20260908_013309_flocking_40
-  gridContainer: {fileID: 0}
-  columns: 8
-  spacing: 6
-  loop: 1
-  restartPause: 0.5
-  prepareTimeout: 60
-  recordOneIteration: 0
-  renderWidth: 480
-  renderHeight: 270
 --- !u!4 &363961735
 Transform:
   m_ObjectHideFlags: 0
@@ -175,6 +151,34 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &363961736
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 363961733}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e4e0604bcd1e6482a9f046f0735e0521, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AllGridManager
+  motionType: 0
+  maxSpeed: 1.5
+  perceptionRadius: 1.5
+  randomMovement: 0
+  anyRandomness: 1
+  expectedLayouts: 0
+  folderPath: Assets/SimulationRecordings/Combinations/20260917_015840
+  gridContainer: {fileID: 0}
+  columns: 8
+  spacing: 6
+  loop: 1
+  restartPause: 0.5
+  prepareTimeout: 60
+  recordOneIteration: 0
+  renderWidth: 480
+  renderHeight: 270
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
