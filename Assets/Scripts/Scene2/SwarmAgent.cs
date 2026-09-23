@@ -134,6 +134,7 @@ public class SwarmAgent : MonoBehaviour
                 // If we're inside the collider, ClosestPoint returns the point itself.
                 if (distFromSurface <= 0.0001f)
                 {
+                    Debug.Log("Agent is inside the obstacle collider! Using center of collider as fallback.");
                     away = currentPosition - (Vector2)obstacleCollider.bounds.center;
                     distFromSurface = away.magnitude;
 
@@ -144,7 +145,7 @@ public class SwarmAgent : MonoBehaviour
                     }
                 }
 
-                if (distFromSurface < manager.obstacleAvoidanceRadius)
+                if (distFromSurface < manager.obstacleAvoidanceRadius) // 0.1
                 {
                     // Inverse square law based on distance from the collider surface.
                     Vector2 avoidDirection = away.normalized;

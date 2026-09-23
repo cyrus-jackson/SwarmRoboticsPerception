@@ -285,19 +285,19 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Record every combination once per saved spawn layout, using the layouts named in 'Reuse Spawn Layouts' below. This is what makes a Combinations batch analysable by matched_start.py: each clip carries the layout it began from, so it can be paired with the no-randomness run that started from the same arrangement. Off means a fresh random spawn per clip, which is not paired.")]
     public bool combinationsUseSpawnLayouts = true;
 
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Dispersion };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
-    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 10.0f, 20.0f, 40.0f, 60.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
-    public float[] combinationParam2Values = new float[] { 1.5f, 3.5f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
+    public float[] combinationParam2Values = new float[] { 1.5f, 3.5f, 4.0f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
     // public float[] combinationParam2Values = new float[] { 0.15f };
 
     public SwarmParameterToRecord combinationParameter3 = SwarmParameterToRecord.MaxSpeed;
-    public float[] combinationParam3Values = new float[] { 1.5f, 3.0f };
+    public float[] combinationParam3Values = new float[] { 1.5f };
 
     [Header("Matched Start Batch (single parameter, identical spawns)")]
     [Tooltip("How many different starting layouts to generate. Each one is swept through every parameter value, so the comparison between values is paired and spawn luck cancels out.")]
-    public int matchedStartLayouts = 15;
+    public int matchedStartLayouts = 1;
 
     [Tooltip("Save each layout as JSON under SimulationRecordings/SpawnLayouts so a later batch can reuse the exact same starts.")]
     public bool saveSpawnLayouts = true;

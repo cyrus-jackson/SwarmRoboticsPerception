@@ -167,9 +167,9 @@ MonoBehaviour:
   maxSpeed: 1.5
   perceptionRadius: 1.5
   randomMovement: 0
-  anyRandomness: 1
+  anyRandomness: 0
   expectedLayouts: 0
-  folderPath: Assets/SimulationRecordings/Combinations/20260917_015840
+  folderPath: Assets/SimulationRecordings/Combinations/20260908_013309_flocking_40
   gridContainer: {fileID: 0}
   columns: 8
   spacing: 6
