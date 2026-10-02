@@ -56,6 +56,10 @@ public class AllGridManager : MonoBehaviour
     [Min(16)] public int renderWidth = 480;
     [Min(16)] public int renderHeight = 270;
 
+    public bool HasFailed => failed;
+    public string LastError { get; private set; }
+    public string LastRecordingPath { get; private set; }
+
     /// <summary>Tracks the video resources and playback state owned by one layout cell.</summary>
     private sealed class Cell
     {
@@ -95,13 +99,20 @@ public class AllGridManager : MonoBehaviour
     private FlockGridCapture capture;
 #endif
 
-    private void Start() => BuildGrid();
+    private void Start()
+    {
+        if (!built) BuildGrid();
+    }
 
     [ContextMenu("Build / Reload Grid")]
     public void BuildGrid()
     {
         if (!Application.isPlaying) return;
+        bool captureRequested = recordOneIteration;
         ClearGrid();
+        recordOneIteration = captureRequested;
+        LastError = null;
+        LastRecordingPath = null;
         recordToggleState = recordOneIteration;
         recordingPending = recordOneIteration;
         loadedSpeed = maxSpeed;
@@ -210,6 +221,13 @@ public class AllGridManager : MonoBehaviour
         if (!failed) SetHeading("Paused");
     }
 
+    public void StopRecording()
+    {
+        FinishCapture(false);
+        recordOneIteration = recordToggleState = recordingPending = false;
+        PauseGrid();
+    }
+
     [ContextMenu("Resume Grid")]
     public void ResumeGrid()
     {
@@ -268,7 +286,9 @@ public class AllGridManager : MonoBehaviour
         try
         {
             capture = new FlockGridCapture();
-            capture.Start(loadedSpeed, loadedPerception, loadedMotionType.ToString().ToLowerInvariant());
+            string label = loadedMotionType.ToString().ToLowerInvariant() +
+                (loadedAnyRandom ? "_random_any" : "_random_" + loadedRandom.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            capture.Start(loadedSpeed, loadedPerception, label);
             SetHeading("Recording one iteration");
             Debug.Log($"[AllGridManager] Recording one iteration to {capture.FinalPath}", this);
             return true;
@@ -296,12 +316,13 @@ public class AllGridManager : MonoBehaviour
         try
         {
             string path = finishedCapture.Finish(complete);
+            if (complete) LastRecordingPath = path;
             if (path != null)
                 Debug.Log($"[AllGridManager] {(complete ? "Saved complete grid iteration" : "Saved interrupted grid recording (partial)")}: {path}", this);
         }
         catch (Exception exception)
         {
-            Debug.LogError($"[AllGridManager] Could not finish grid recording: {exception.Message}", this);
+            Fail($"Could not finish grid recording: {exception.Message}");
         }
 #endif
     }
@@ -452,6 +473,7 @@ public class AllGridManager : MonoBehaviour
     {
         FinishCapture(false);
         failed = true;
+        LastError = message;
         waiting = false;
         foreach (Cell cell in cells)
             if (cell.player != null) cell.player.Pause();

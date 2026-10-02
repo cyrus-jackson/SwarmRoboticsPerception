@@ -1,9 +1,27 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>Integrates swarm steering and tracks each agent's contacts with arena walls.</summary>
 public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
+    private readonly HashSet<Collider2D> touchingWalls = new HashSet<Collider2D>();
+
+    public bool HasHitWall { get; private set; }
+
+    public void ResetWallContactTracking()
+    {
+        HasHitWall = false;
+        // A sleeping body may receive no stay callback, so retain contacts present at capture start.
+        foreach (Collider2D wall in touchingWalls)
+        {
+            if (wall != null && wall.enabled && wall.gameObject.activeInHierarchy)
+            {
+                HasHitWall = true;
+                break;
+            }
+        }
+    }
 
     // Random movement rule (Hénard et al. 2024, rule 4): X and Y are drawn in [-0.5, 0.5].
     // Sampled once per rendered frame and reused across the frame's substeps, so subdividing
@@ -192,17 +210,48 @@ public class SwarmAgent : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (collision.gameObject.name.ToLower().Contains("wall") || collision.gameObject.CompareTag("Wall"))
-        {
-            Debug.Log($"{gameObject.name} hit the wall: {collision.gameObject.name}");
-        }
+        RegisterWallContact(collision.collider, true);
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        RegisterWallContact(collision.collider, false);
+    }
+
+    private void OnCollisionExit2D(Collision2D collision)
+    {
+        touchingWalls.Remove(collision.collider);
     }
 
     private void OnTriggerEnter2D(Collider2D collider)
     {
-        if (collider.gameObject.name.ToLower().Contains("wall") || collider.gameObject.CompareTag("Wall"))
+        RegisterWallContact(collider, true);
+    }
+
+    private void OnTriggerStay2D(Collider2D collider)
+    {
+        RegisterWallContact(collider, false);
+    }
+
+    private void OnTriggerExit2D(Collider2D collider)
+    {
+        touchingWalls.Remove(collider);
+    }
+
+    private void RegisterWallContact(Collider2D collider, bool logHit)
+    {
+        if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) return;
+
+        for (Transform wall = collider.transform; wall != null; wall = wall.parent)
         {
-            Debug.Log($"{gameObject.name} hit the wall: {collider.gameObject.name}");
+            if (wall.gameObject.CompareTag("Wall") ||
+                wall.name.IndexOf("wall", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                touchingWalls.Add(collider);
+                HasHitWall = true;
+                if (logHit) Debug.Log($"{gameObject.name} hit the wall: {collider.gameObject.name}");
+                return;
+            }
         }
     }
 }

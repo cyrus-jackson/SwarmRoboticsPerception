@@ -2,17 +2,19 @@
 using UnityEditor;
 using UnityEngine;
 
+/// <summary>Displays per-motion recording rules and validates their inspector settings.</summary>
 [CustomEditor(typeof(SimRecorder))]
 public class SimRecorderEditor : Editor
 {
     private static readonly string[] EndConditionLabels =
         { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled",
-          "Cluster Count" };
+          "Cluster Count", "Wall Contact Reached" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
     private const int AbsoluteHullAreaIndex = 3;
     private const int SpreadSettledIndex = 4;
     private const int ClusterCountIndex = 5;
+    private const int WallContactReachedIndex = 6;
 
     /// <summary>Index of DensityRatioBaseline.NoRandomnessReference in that enum.</summary>
     private const int NoRandomnessReferenceIndex = 1;
@@ -47,6 +49,7 @@ public class SimRecorderEditor : Editor
                 SerializedProperty wallsToDisable = entry.FindPropertyRelative("wallsToDisable");
                 SerializedProperty endCondition = entry.FindPropertyRelative("endCondition");
                 SerializedProperty percent = entry.FindPropertyRelative("goalAreaAgentPercent");
+                SerializedProperty wallContactPercent = entry.FindPropertyRelative("wallContactAgentPercent");
                 SerializedProperty densityMetric = entry.FindPropertyRelative("densityMetric");
                 SerializedProperty densityBaseline = entry.FindPropertyRelative("densityRatioBaseline");
                 SerializedProperty densityTargetRatio = entry.FindPropertyRelative("densityTargetRatio");
@@ -72,6 +75,23 @@ public class SimRecorderEditor : Editor
                 using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != TargetAreaReachedIndex))
                 {
                     EditorGUILayout.Slider(percent, 0f, 100f, new GUIContent("Agents Inside %"));
+                }
+
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != WallContactReachedIndex))
+                {
+                    EditorGUILayout.Slider(wallContactPercent, 0f, 100f, new GUIContent("Agents Hit Any Wall %"));
+                }
+
+                if (endCondition.enumValueIndex == WallContactReachedIndex)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Counts unique agents that touch any wall during capture. Repeated hits and " +
+                        "touching different walls count once per agent. Warm-up contacts are cleared; " +
+                        "agents still touching a wall when capture starts count. The percentage uses " +
+                        "the agents actually spawned. Both collisions and triggers count. Walls use " +
+                        "the Wall tag or a name containing 'wall', including parent objects. " +
+                        "0 disables the condition and records to the duration cap.",
+                        MessageType.Info);
                 }
 
                 using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != DensityRatioReachedIndex))
@@ -101,9 +121,11 @@ public class SimRecorderEditor : Editor
                     {
                         EditorGUILayout.HelpBox(
                             "The ratio is measured against the settled spread of the randomMovement = 0 " +
-                            "run from the same layout, radius and max speed. That reference is captured " +
-                            "as it records, so 0 must come FIRST in Combination Param 1 Values. A run " +
-                            "with no reference yet falls back to the duration cap and warns.",
+                            "run from the same layout and motion settings. Combinations batches measure " +
+                            "missing references automatically before recording, even with Use Spawn Layouts " +
+                            "off and no zero in the parameter values. These reference runs are not saved " +
+                            "as clips. The batch stops if a required reference cannot settle within the " +
+                            "duration cap. Other recording modes still require a reference recorded first.",
                             MessageType.Info);
                     }
                 }

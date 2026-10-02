@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 363961735}
   - component: {fileID: 363961736}
+  - component: {fileID: 363961737}
   m_Layer: 0
   m_Name: FlockGridManager
   m_TagString: Untagged
@@ -163,15 +164,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e4e0604bcd1e6482a9f046f0735e0521, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AllGridManager
-  motionType: 0
+  motionType: 2
   maxSpeed: 1.5
   perceptionRadius: 1.5
-  randomMovement: 0
-  anyRandomness: 0
+  randomMovement: 20
+  anyRandomness: 1
   expectedLayouts: 0
-  folderPath: Assets/SimulationRecordings/Combinations/20260908_013309_flocking_40
+  folderPath: Assets/SimulationRecordings/Combinations/20261001_054448
   gridContainer: {fileID: 0}
-  columns: 8
+  columns: 5
   spacing: 6
   loop: 1
   restartPause: 0.5
@@ -179,6 +180,32 @@ MonoBehaviour:
   recordOneIteration: 0
   renderWidth: 480
   renderHeight: 270
+--- !u!114 &363961737
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 363961733}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 04dff99e2da94ea3b54c9d3238fe66ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AllGridBatchManager
+  recordOnStart: 1
+  allMotionTypes: 1
+  selectedMotionType: 0
+  parameter: 0
+  fixedRandom: 0
+  fixedSpeed: 3
+  fixedPerception: 4
+  folderPath: Assets/SimulationRecordings/Combinations/20260929_024819
+  motionSources: []
+  expectedLayouts: 10
+  columns: 5
+  status: Ready
+  completedRecordings: 0
+  totalRecordings: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
