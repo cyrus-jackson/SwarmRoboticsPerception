@@ -8,13 +8,20 @@ public class SimRecorderEditor : Editor
 {
     private static readonly string[] EndConditionLabels =
         { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled",
-          "Cluster Count", "Wall Contact Reached" };
+          "Cluster Count", "Wall Contact Reached", "Average Other Motions" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
     private const int AbsoluteHullAreaIndex = 3;
     private const int SpreadSettledIndex = 4;
     private const int ClusterCountIndex = 5;
     private const int WallContactReachedIndex = 6;
+    private const int AverageOtherMotionDurationIndex = 7;
+    private static readonly string[] NonRandomEndConditionLabels = new string[AverageOtherMotionDurationIndex];
+
+    static SimRecorderEditor()
+    {
+        System.Array.Copy(EndConditionLabels, NonRandomEndConditionLabels, NonRandomEndConditionLabels.Length);
+    }
 
     /// <summary>Index of DensityRatioBaseline.NoRandomnessReference in that enum.</summary>
     private const int NoRandomnessReferenceIndex = 1;
@@ -67,10 +74,28 @@ public class SimRecorderEditor : Editor
                 EditorGUILayout.PropertyField(swarmType, new GUIContent("Motion Type"));
                 EditorGUILayout.PropertyField(startDelay, new GUIContent("Start Delay (s, not recorded)"));
 
+                bool isRandom = swarmType.enumValueIndex == (int)SwarmType.Random;
+                if (!isRandom && endCondition.enumValueIndex == AverageOtherMotionDurationIndex)
+                    endCondition.enumValueIndex = 0;
+
+                string[] conditionLabels = isRandom ? EndConditionLabels : NonRandomEndConditionLabels;
                 endCondition.enumValueIndex = GUILayout.SelectionGrid(
                     endCondition.enumValueIndex,
-                    EndConditionLabels,
-                    EndConditionLabels.Length);
+                    conditionLabels,
+                    conditionLabels.Length);
+
+                bool usesAverageDuration = endCondition.enumValueIndex == AverageOtherMotionDurationIndex;
+                if (usesAverageDuration)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Random records for the mean motion duration of all other clips in this batch. " +
+                        "Combinations and Swarm Type + Parameter batches run Random last automatically. " +
+                        "Each completed non-Random clip counts equally, including recorded tails. " +
+                        "Warm-up, ending markers, finished cards and automatic reference clips are excluded. " +
+                        "The average replaces the duration cap; dwell and an additional tail are not applied. " +
+                        "Include at least one other motion type in the batch.",
+                        MessageType.Info);
+                }
 
                 using (new EditorGUI.DisabledScope(endCondition.enumValueIndex != TargetAreaReachedIndex))
                 {
@@ -178,13 +203,16 @@ public class SimRecorderEditor : Editor
 
                 // Both only mean something when a rule can fire. On FixedDuration there is no event
                 // to dwell on and no moment to pad, so they are greyed out rather than misleading.
-                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0))
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration))
                 {
                     EditorGUILayout.PropertyField(dwell, new GUIContent("Dwell Before Ending (s)"));
                     EditorGUILayout.PropertyField(endDelay, new GUIContent("End Delay (s, recorded)"));
                 }
 
-                EditorGUILayout.PropertyField(overrideTime, new GUIContent("Max Time Override (0 = global)"));
+                using (new EditorGUI.DisabledScope(usesAverageDuration))
+                {
+                    EditorGUILayout.PropertyField(overrideTime, new GUIContent("Max Time Override (0 = global)"));
+                }
                 EditorGUILayout.PropertyField(wallsToDisable, new GUIContent("Walls To Disable (by name)"), true);
 
                 EditorGUILayout.EndVertical();

@@ -60,7 +60,9 @@ public enum RecordingEndCondition
     /// </summary>
     ClusterCountReached,
     /// <summary>Stop once wallContactAgentPercent of unique spawned agents have touched any wall during capture.</summary>
-    WallContactReached
+    WallContactReached,
+    /// <summary>Random only: record for the mean motion duration of the other completed clips in this batch.</summary>
+    AverageOtherMotionDuration
 }
 
 /// <summary>What <c>densityTargetRatio</c> is a ratio of.</summary>
@@ -204,7 +206,10 @@ public class SimRecorder : MonoBehaviour
         public int clusterCountAtEnd;                // groups when the clip finished
         public int minClusterSize;                   // smallest group counted
         public float endConditionDwellTime;          // seconds the rule had to hold before firing
-        public float recordedDuration;               // seconds of motion recorded
+        public float recordedDuration;               // motion plus the ending marker
+        public float recordedMotionDuration;         // includes the recorded tail, excludes closing frames
+        public float averageOtherMotionDuration;
+        public int averageOtherMotionSampleCount;
         public float maxRecordingTime;               // duration cap that applied to this sim
         public string goalAreaName;
         public float goalAreaAgentPercentThreshold;  // 0 when the condition was FixedDuration
@@ -254,7 +259,7 @@ public class SimRecorder : MonoBehaviour
     {
         new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.3f, recordingEndDelay = 3f },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.WallContactReached, wallContactAgentPercent = 10f },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.AverageOtherMotionDuration },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 3f }
     };
 
@@ -304,10 +309,10 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Record the no-randomness reference runs (mp4 + trajectory json) into a NoRandomnessReferences child folder of the batch, with their own batch_config.json. Off measures them unrecorded.")]
     public bool saveNoRandomnessReferences = true;
 
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Random };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Dispersion, SwarmType.Random };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     [Tooltip("RandomMovement sweep values are added to a base of 60 for Random motion only. For all other motion types and parameters, values are used directly. This applies to any of the three parameter axes.")]
-    public float[] combinationParam1Values = new float[] { 20.0f, 40.0f };
+    public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
     public SwarmParameterToRecord combinationParameter2 = SwarmParameterToRecord.PerceptionRad;
     public float[] combinationParam2Values = new float[] { 1.5f, 4.0f }; // 0.5f, 1.0f, 1.5f, 1.8f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f
     // public float[] combinationParam2Values = new float[] { 0.15f };
@@ -364,6 +369,9 @@ public class SimRecorder : MonoBehaviour
 
     // Outcome of the most recent recording window.
     private float lastRecordedDuration;
+    private float lastRecordedMotionDuration;
+    private float lastAverageOtherMotionDuration;
+    private int lastAverageOtherMotionSampleCount;
     private string lastEndReason = "timeout";
     private string lastGoalAreaName;
     private int lastAgentsInsideGoalArea;
@@ -780,6 +788,9 @@ public class SimRecorder : MonoBehaviour
                 case RecordingEndCondition.WallContactReached:
                     rule = $"WallContactReached@{entry.wallContactAgentPercent:F0}% unique agents";
                     break;
+                case RecordingEndCondition.AverageOtherMotionDuration:
+                    rule = "AverageOtherMotionDuration[Random only]";
+                    break;
                 case RecordingEndCondition.DensityRatioReached:
                     rule = $"DensityRatioReached[{entry.densityMetric}]@{entry.densityTargetRatio:F2}";
                     break;
@@ -800,15 +811,17 @@ public class SimRecorder : MonoBehaviour
                     break;
             }
 
-            string tail = entry.recordingEndDelay > 0f ? $",tail {entry.recordingEndDelay:F1}s" : "";
+            bool usesAverageDuration = entry.endCondition == RecordingEndCondition.AverageOtherMotionDuration;
+            string tail = !usesAverageDuration && entry.recordingEndDelay > 0f
+                ? $",tail {entry.recordingEndDelay:F1}s" : "";
             string description = $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,{rule}{tail}";
 
-            if (entry.overrideRecordingTime > 0f)
+            if (!usesAverageDuration && entry.overrideRecordingTime > 0f)
             {
                 description += $" (max {entry.overrideRecordingTime:F1}s)";
             }
 
-            if (entry.endConditionDwellTime > 0f)
+            if (!usesAverageDuration && entry.endConditionDwellTime > 0f)
             {
                 description += $" (dwell {entry.endConditionDwellTime:F2}s)";
             }
@@ -827,13 +840,73 @@ public class SimRecorder : MonoBehaviour
     /// <summary>The motion type currently loaded in the scene.</summary>
     private SwarmType CurrentSwarmType => uiController != null ? uiController.SelectedSwarmType : currentSwarmTypeDisplay;
 
-    /// <summary>
-    /// Runs a single recording window using the end condition of the current motion type: either
-    /// the full duration, or an early stop once that type's arrival percentage is inside its goal
-    /// area. The duration always acts as the upper bound. A "Video Finished" card is then held on
-    /// screen (and captured into the clip) before the recorder is stopped.
-    /// </summary>
-    private IEnumerator RunRecordingWindow(string outputFolder = null, string outputFileName = null, bool referenceOnly = false)
+    private bool ValidateSingleMotionRecording()
+    {
+        if (GetSettingsFor(CurrentSwarmType).endCondition != RecordingEndCondition.AverageOtherMotionDuration)
+            return true;
+
+        Debug.LogError("[SimRecorder] AverageOtherMotionDuration requires Random in a Combinations or " +
+                       "Swarm Type + Parameter batch with at least one other motion type.");
+        return false;
+    }
+
+    private bool TryGetBatchRecordingOrder(List<SwarmType> types, out List<SwarmType> order)
+    {
+        order = types != null ? new List<SwarmType>(types) : new List<SwarmType>();
+        if (order.Count == 0) return false;
+
+        foreach (SwarmType type in order)
+        {
+            if (type != SwarmType.Random &&
+                GetSettingsFor(type).endCondition == RecordingEndCondition.AverageOtherMotionDuration)
+            {
+                Debug.LogError($"[SimRecorder] AverageOtherMotionDuration is only available for Random, not {type}.");
+                return false;
+            }
+        }
+
+        if (!order.Contains(SwarmType.Random) ||
+            GetSettingsFor(SwarmType.Random).endCondition != RecordingEndCondition.AverageOtherMotionDuration)
+            return true;
+
+        if (!order.Exists(type => type != SwarmType.Random))
+        {
+            Debug.LogError("[SimRecorder] Random needs another motion type in this batch to calculate its average duration.");
+            return false;
+        }
+
+        // All source clips must finish before Random; keep the configured order among other types.
+        order.RemoveAll(type => type == SwarmType.Random);
+        foreach (SwarmType type in types)
+            if (type == SwarmType.Random) order.Add(type);
+        return true;
+    }
+
+    private static bool TryGetOtherMotionAverage(List<SimulationConfig> simulations, out float duration, out int sampleCount)
+    {
+        double total = 0d;
+        sampleCount = 0;
+        if (simulations != null)
+        {
+            foreach (SimulationConfig clip in simulations)
+            {
+                if (clip == null || string.IsNullOrEmpty(clip.endReason) ||
+                    string.IsNullOrEmpty(clip.swarmType) || clip.swarmType == SwarmType.Random.ToString() ||
+                    clip.recordedMotionDuration < 0f || float.IsNaN(clip.recordedMotionDuration) ||
+                    float.IsInfinity(clip.recordedMotionDuration)) continue;
+
+                total += clip.recordedMotionDuration;
+                sampleCount++;
+            }
+        }
+
+        duration = sampleCount > 0 ? (float)(total / sampleCount) : 0f;
+        return sampleCount > 0;
+    }
+
+    /// <summary>Runs a motion window and adds the configured closing frames for recorded clips.</summary>
+    private IEnumerator RunRecordingWindow(string outputFolder = null, string outputFileName = null,
+        bool referenceOnly = false, List<SimulationConfig> batchSimulations = null)
     {
         // Trajectory capture runs for exactly the recorded window, so the json lines up with the mp4.
         SwarmTrajectoryRecorder trajectory = referenceOnly ? null : ResolveTrajectoryRecorder();
@@ -849,6 +922,18 @@ public class SimRecorder : MonoBehaviour
         SwarmDensityMonitor densityMonitor = ResolveDensityMonitor();
 
         float maxTime = settings.overrideRecordingTime > 0f ? settings.overrideRecordingTime : recordingTimePerSim;
+        lastAverageOtherMotionDuration = 0f;
+        lastAverageOtherMotionSampleCount = 0;
+        bool averageDurationEnabled = swarmType == SwarmType.Random &&
+                                      settings.endCondition == RecordingEndCondition.AverageOtherMotionDuration &&
+                                      TryGetOtherMotionAverage(batchSimulations, out lastAverageOtherMotionDuration,
+                                          out lastAverageOtherMotionSampleCount);
+        if (averageDurationEnabled)
+        {
+            maxTime = lastAverageOtherMotionDuration;
+            Debug.Log($"[SimRecorder] Random: recording for the average motion duration {maxTime:F2}s " +
+                      $"of {lastAverageOtherMotionSampleCount} other clips in this batch.");
+        }
         bool wantsGoalCondition = settings.endCondition == RecordingEndCondition.TargetAreaReached;
         bool goalConditionEnabled = wantsGoalCondition && goalArea != null && settings.goalAreaAgentPercent > 0f;
         bool wantsWallContactCondition = settings.endCondition == RecordingEndCondition.WallContactReached;
@@ -991,7 +1076,7 @@ public class SimRecorder : MonoBehaviour
 
         // The condition must hold continuously for this long before the clip ends, so a swarm whose
         // hull oscillates cannot stop a recording on a momentary spike.
-        float dwellRequired = Mathf.Max(0f, settings.endConditionDwellTime);
+        float dwellRequired = averageDurationEnabled ? 0f : Mathf.Max(0f, settings.endConditionDwellTime);
         float heldFor = 0f;
 
         lastEndReason = "timeout";
@@ -1159,6 +1244,12 @@ public class SimRecorder : MonoBehaviour
             }
         }
 
+        lastRecordedMotionDuration = timer;
+        if (averageDurationEnabled)
+        {
+            lastEndReason = "average-other-motion-duration";
+        }
+
         // Mark the closing frames while the recorder is still running, so the clip itself shows
         // where it stopped. A single frame at 60 fps is invisible on playback, hence the hold.
         overlayStatus = "Video Ended";
@@ -1258,6 +1349,9 @@ public class SimRecorder : MonoBehaviour
 
         config.endReason = lastEndReason;
         config.recordedDuration = lastRecordedDuration;
+        config.recordedMotionDuration = lastRecordedMotionDuration;
+        config.averageOtherMotionDuration = lastAverageOtherMotionDuration;
+        config.averageOtherMotionSampleCount = lastAverageOtherMotionSampleCount;
         config.goalAreaName = lastGoalAreaName;
         config.endConditionUsed = lastEndConditionUsed.ToString();
         config.recordingStartDelay = lastStartDelay;
@@ -1386,7 +1480,7 @@ public class SimRecorder : MonoBehaviour
     }
     public void StartSingleParameterBatchRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(SingleParameterBatchRecordCoroutine());
         }
@@ -1394,7 +1488,7 @@ public class SimRecorder : MonoBehaviour
 
     public void StartMatchedStartBatchRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(MatchedStartBatchRecordCoroutine());
         }
@@ -1728,7 +1822,7 @@ public class SimRecorder : MonoBehaviour
 
     public void StartBatchRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(BatchRecordCoroutine());
         }
@@ -1736,7 +1830,7 @@ public class SimRecorder : MonoBehaviour
 
     public void StartObstacleBatchRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(ObstacleBatchRecordCoroutine());
         }
@@ -1744,7 +1838,7 @@ public class SimRecorder : MonoBehaviour
 
     public void StartObstacleSpawnLocationBatchRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(ObstacleSpawnLocationBatchRecordCoroutine());
         }
@@ -1768,7 +1862,7 @@ public class SimRecorder : MonoBehaviour
 
     public void StartCurrentSettingsRecording()
     {
-        if (!isRecording)
+        if (!isRecording && ValidateSingleMotionRecording())
         {
             StartCoroutine(CurrentSettingsRecordCoroutine());
         }
@@ -1907,6 +2001,13 @@ public class SimRecorder : MonoBehaviour
             yield break;
         }
 
+        if (!TryGetBatchRecordingOrder(combinationSwarmTypes, out List<SwarmType> recordingTypes))
+        {
+            isRecording = false;
+            hideOverlayText = false;
+            yield break;
+        }
+
         string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
         string paramFolderName = "Combinations";
         string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -1944,7 +2045,7 @@ public class SimRecorder : MonoBehaviour
         Dictionary<SwarmType, List<SpawnLayout>> layoutsByType =
             new Dictionary<SwarmType, List<SpawnLayout>>();
 
-        foreach (SwarmType layoutType in combinationSwarmTypes)
+        foreach (SwarmType layoutType in recordingTypes)
         {
             if (layoutsByType.ContainsKey(layoutType)) continue;
 
@@ -2008,7 +2109,7 @@ public class SimRecorder : MonoBehaviour
 
         // Upper bound on the number of clips (duplicate combinations are skipped as we go).
         int plannedCombinations = 0;
-        foreach (SwarmType plannedType in combinationSwarmTypes)
+        foreach (SwarmType plannedType in recordingTypes)
         {
             int conditions = combinationParam1Values.Length * combinationParam2Values.Length * combinationParam3Values.Length;
 
@@ -2017,16 +2118,16 @@ public class SimRecorder : MonoBehaviour
             plannedCombinations += conditions * layoutsByType[plannedType].Count;
         }
 
-        Debug.Log($"[SimRecorder] Combinations batch starting — up to {plannedCombinations} clips across types: {string.Join(", ", combinationSwarmTypes)}.");
+        Debug.Log($"[SimRecorder] Combinations batch starting — up to {plannedCombinations} clips across types: {string.Join(", ", recordingTypes)}.");
 
-        for (int typeIndex = 0; typeIndex < combinationSwarmTypes.Count && !referenceFailed; typeIndex++)
+        for (int typeIndex = 0; typeIndex < recordingTypes.Count && !referenceFailed; typeIndex++)
         {
-            SwarmType swarmType = combinationSwarmTypes[typeIndex];
+            SwarmType swarmType = recordingTypes[typeIndex];
 
             // This type's own layouts, captured in this type's own spawn area.
             List<SpawnLayout> layouts = layoutsByType[swarmType];
 
-            Debug.Log($"[SimRecorder] === Motion type {typeIndex + 1}/{combinationSwarmTypes.Count}: {swarmType} " +
+            Debug.Log($"[SimRecorder] === Motion type {typeIndex + 1}/{recordingTypes.Count}: {swarmType} " +
                       $"({layouts.Count} layout{(layouts.Count == 1 ? "" : "s")}) ===");
 
             for (int param1Index = 0; param1Index < combinationParam1Values.Length && !referenceFailed; param1Index++)
@@ -2181,7 +2282,7 @@ public class SimRecorder : MonoBehaviour
                             Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                            yield return RunRecordingWindow(targetFolderPath, fileName);
+                            yield return RunRecordingWindow(targetFolderPath, fileName, batchSimulations: simulations);
                             ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -2905,6 +3006,13 @@ public class SimRecorder : MonoBehaviour
             yield break;
         }
 
+        if (!TryGetBatchRecordingOrder(swarmTypesToRecord, out List<SwarmType> recordingTypes))
+        {
+            isRecording = false;
+            isSwarmTypeBatchMode = false;
+            yield break;
+        }
+
         string baseFolderPath = Path.Combine(Application.dataPath, saveFolder);
         string paramFolderName = $"SwarmType_vs_{swarmTypeBatchParameter}";
         string timestampFolder = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -2919,9 +3027,9 @@ public class SimRecorder : MonoBehaviour
         uiController.showUI = false;
 
         List<SimulationConfig> simulations = new List<SimulationConfig>();
-        for (int typeIndex = 0; typeIndex < swarmTypesToRecord.Count; typeIndex++)
+        for (int typeIndex = 0; typeIndex < recordingTypes.Count; typeIndex++)
         {
-            SwarmType sType = swarmTypesToRecord[typeIndex];
+            SwarmType sType = recordingTypes[typeIndex];
             currentSwarmTypeDisplay = sType;
 
             for (int i = 0; i < swarmTypeParamIterations; i++)
@@ -3003,7 +3111,7 @@ public class SimRecorder : MonoBehaviour
                 Debug.LogWarning("Unity Recorder is only available in the Editor interface.");
 #endif
 
-                yield return RunRecordingWindow(targetFolderPath, fileName);
+                yield return RunRecordingWindow(targetFolderPath, fileName, batchSimulations: simulations);
                 ApplyRecordingOutcome(config);
 
 #if UNITY_EDITOR
@@ -3056,7 +3164,7 @@ public class SimRecorder : MonoBehaviour
     private static float ResolveCombinationValue(SwarmType swarmType, SwarmParameterToRecord parameter, float value)
     {
         return swarmType == SwarmType.Random && parameter == SwarmParameterToRecord.RandomMovement
-            ? 40f + value
+            ? 20f + value
             : value;
     }
 }
