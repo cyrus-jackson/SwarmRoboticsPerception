@@ -164,13 +164,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e4e0604bcd1e6482a9f046f0735e0521, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AllGridManager
-  motionType: 2
+  motionType: 4
   maxSpeed: 1.5
   perceptionRadius: 1.5
   randomMovement: 20
   anyRandomness: 1
   expectedLayouts: 0
-  folderPath: Assets/SimulationRecordings/Combinations/20261002_222549
+  folderPath: Assets/SimulationRecordings/Combinations/20261006_164023
   gridContainer: {fileID: 0}
   columns: 5
   spacing: 6
@@ -193,13 +193,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AllGridBatchManager
   recordOnStart: 1
+  autoDetectFolder: 1
+  recordGrids: 1
   allMotionTypes: 1
-  selectedMotionType: 0
+  selectedMotionType: 4
   parameter: 0
   fixedRandom: 0
   fixedSpeed: 3
   fixedPerception: 4
-  folderPath: Assets/SimulationRecordings/Combinations/20261002_222549
+  folderPath: Assets/SimulationRecordings/MatchedStart_Cohesion/20261007_171844
   motionSources: []
   expectedLayouts: 10
   columns: 5

@@ -13,6 +13,7 @@ using UnityEngine;
 /// the distance from one agent's centre to the *edge* of the other's collider, compared against
 /// the perception radius. Measuring clusters with a different rule than the agents use to steer
 /// would report a fragmentation the swarm itself does not experience, or miss one it does.
+/// Densification V2 disables collider edges to use the paper's centre-distance neighbours.
 ///
 /// A lone agent counts as a group of one. The paper treats losing a single robot as fragmentation
 /// ("the swarm loses one or more robots or splits into several groups"), and reporting sizes rather
@@ -34,12 +35,13 @@ public static class SwarmClusterMetrics
     /// can keep one list. Returns the number of components, which is also sizesOut.Count.
     /// </summary>
     public static int ClusterSizes(GameObject[] agents, float perceptionRadius,
-                                   List<int> sizesOut, Collider2D[] colliders = null)
+                                   List<int> sizesOut, Collider2D[] colliders = null,
+                                   bool useColliderEdges = true)
     {
         if (sizesOut == null) sizesOut = new List<int>();
         sizesOut.Clear();
 
-        int n = CollectAgents(agents, colliders);
+        int n = CollectAgents(agents, colliders, useColliderEdges);
         if (n == 0) return 0;
 
         EnsureCapacity(n);
@@ -66,10 +68,10 @@ public static class SwarmClusterMetrics
 
     /// <summary>Number of connected components, when the sizes themselves are not needed.</summary>
     public static int ClusterCount(GameObject[] agents, float perceptionRadius,
-                                   Collider2D[] colliders = null)
+                                   Collider2D[] colliders = null, bool useColliderEdges = true)
     {
         List<int> scratch = new List<int>();
-        return ClusterSizes(agents, perceptionRadius, scratch, colliders);
+        return ClusterSizes(agents, perceptionRadius, scratch, colliders, useColliderEdges);
     }
 
     /// <summary>
@@ -87,7 +89,7 @@ public static class SwarmClusterMetrics
         return edgeDistance < perceptionRadius;
     }
 
-    private static int CollectAgents(GameObject[] agents, Collider2D[] colliders)
+    private static int CollectAgents(GameObject[] agents, Collider2D[] colliders, bool useColliderEdges)
     {
         if (agents == null) return 0;
 
@@ -107,9 +109,9 @@ public static class SwarmClusterMetrics
 
             // Prefer the cached collider array; fall back to a lookup only when it is absent.
             Collider2D collider = (colliders != null && i < colliders.Length) ? colliders[i] : null;
-            if (collider == null) collider = agent.GetComponent<Collider2D>();
+            if (useColliderEdges && collider == null) collider = agent.GetComponent<Collider2D>();
 
-            radii[n] = collider != null
+            radii[n] = useColliderEdges && collider != null
                 ? Mathf.Max(collider.bounds.extents.x, collider.bounds.extents.y)
                 : 0f;
 

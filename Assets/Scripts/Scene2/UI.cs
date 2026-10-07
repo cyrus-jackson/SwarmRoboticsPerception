@@ -7,7 +7,8 @@ public enum SwarmType
     Flocking,
     Densification,
     Random,
-    Dispersion
+    Dispersion,
+    DensificationV2
 }
 
 public enum AgentSpawnType
@@ -18,6 +19,7 @@ public enum AgentSpawnType
     Chain
 }
 
+/// <summary>Controls swarm presets, spawning, visualization, and recording from the runtime panel.</summary>
 public class UI : MonoBehaviour
 {
     [Header("Swarm Setup")]
@@ -306,7 +308,8 @@ public class UI : MonoBehaviour
         switch (type)
         {
             case SwarmType.Dispersion: return circleSpawnArea;
-            case SwarmType.Densification: return densificationSpawnArea;
+            case SwarmType.Densification:
+            case SwarmType.DensificationV2: return densificationSpawnArea;
             case SwarmType.Flocking: return flockingSpawnArea;
             default:
                 if (spawnAreas != null && selectedSpawnAreaIndex < spawnAreas.Length)
@@ -420,6 +423,18 @@ public class UI : MonoBehaviour
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
+            case SwarmType.DensificationV2:
+                // Balance a pair at 0.7 units, outside the 0.35-unit avoidance threshold.
+                uiCohesion = 2.0f;
+                uiSeparation = 0.35f;
+                uiAlignment = 0.0f;
+                uiFriction = 1.0f;
+                uiRandomMvmt = 0.0f;
+                uiOverlapAvoid = 1.0f;
+                uiObstacleRad = 0.1f;
+                uiSafetyDist = 0.35f;
+                uiPerceptionRad = 1.5f;
+                break;
             case SwarmType.Random:
                 uiCohesion = 0.0f;
                 uiSeparation = 0.0f;
@@ -485,6 +500,11 @@ public class UI : MonoBehaviour
             ApplyPreset(selectedSwarmType);
         }
         GUILayout.EndHorizontal();
+
+        if (selectedSwarmType == SwarmType.DensificationV2)
+        {
+            GUILayout.Label("Densification V2: local neighbour attraction, no common fate.");
+        }
 
         GUILayout.BeginHorizontal();
         GUILayout.Label("Spawn:", GUILayout.Width(80));
@@ -653,7 +673,8 @@ public class UI : MonoBehaviour
     float DrawSlider(string label, float val, float min, float max, bool isInt = false)
     {
         GUILayout.BeginHorizontal();
-        GUILayout.Label($"{label}: {(isInt ? (int)val : val.ToString("F1"))}", GUILayout.Width(100));
+        string numberFormat = selectedSwarmType == SwarmType.DensificationV2 ? "F2" : "F1";
+        GUILayout.Label($"{label}: {(isInt ? (int)val : val.ToString(numberFormat))}", GUILayout.Width(100));
         float result = GUILayout.HorizontalSlider(val, min, max);
         GUILayout.EndHorizontal();
         return isInt ? Mathf.Round(result) : result;
@@ -785,7 +806,8 @@ public class UI : MonoBehaviour
         if (swarmManager == null || swarmManager.agents == null) return "Groups: no agents";
 
         SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
-                                         clusterSizeBuffer, swarmManager.AgentColliders);
+                                         clusterSizeBuffer, swarmManager.AgentColliders,
+                                         !swarmManager.useDensificationV2);
 
         if (clusterSizeBuffer.Count == 0) return "Groups: no agents";
 
@@ -845,6 +867,7 @@ public class UI : MonoBehaviour
     {
         if (swarmManager == null) return;
 
+        swarmManager.useDensificationV2 = selectedSwarmType == SwarmType.DensificationV2;
         swarmManager.cohesionIntensity = uiCohesion;
         swarmManager.separationIntensity = uiSeparation;
         swarmManager.alignmentIntensity = uiAlignment;
@@ -865,11 +888,7 @@ public class UI : MonoBehaviour
         Transform defaultObstacle = GetDefaultObstacle();
         if (defaultObstacle != null)
         {
-            // Keep only the default obstacle active to avoid confusion.
-            for (int i = 0; i < obstacles.Count; i++)
-            {
-                if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == 0);
-            }
+            SyncDefaultObstacleActiveState();
 
             swarmManager.centralObstacle = defaultObstacle;
         }
@@ -906,7 +925,7 @@ public class UI : MonoBehaviour
             }
         }
 
-        if (selectedSwarmType == SwarmType.Dispersion)
+        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.DensificationV2)
         {
             swarmManager.commonFateTarget = null;
             swarmManager.commonFateCollider = null;
@@ -986,6 +1005,8 @@ public class UI : MonoBehaviour
             activeGoalAreaTransform.gameObject.SetActive(true);
         }
 
+        if (densityMonitor != null) densityMonitor.contextLabel = selectedSwarmType.ToString();
+
         if (activeGoalAreaTransform == null)
         {
             ActiveGoalArea = null;
@@ -1001,7 +1022,6 @@ public class UI : MonoBehaviour
 
         // Tag logs with the motion type so console output is readable during batch runs.
         goalArea.contextLabel = selectedSwarmType.ToString();
-        if (densityMonitor != null) densityMonitor.contextLabel = selectedSwarmType.ToString();
 
         ActiveGoalArea = goalArea;
         if (swarmManager != null) swarmManager.goalArea = goalArea;
@@ -1027,7 +1047,8 @@ public class UI : MonoBehaviour
 
         Transform activeSpawnArea = null;
 
-        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.Flocking)
+        if (selectedSwarmType == SwarmType.Dispersion || selectedSwarmType == SwarmType.Densification ||
+            selectedSwarmType == SwarmType.DensificationV2 || selectedSwarmType == SwarmType.Flocking)
         {
             if (selectedSwarmType == SwarmType.Dispersion)
             {
@@ -1036,7 +1057,7 @@ public class UI : MonoBehaviour
                 if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(false);
                 if (flockingSpawnArea != null) flockingSpawnArea.gameObject.SetActive(false);
             }
-            else if (selectedSwarmType == SwarmType.Densification)
+            else if (selectedSwarmType == SwarmType.Densification || selectedSwarmType == SwarmType.DensificationV2)
             {
                 activeSpawnArea = densificationSpawnArea;
                 if (densificationSpawnArea != null) densificationSpawnArea.gameObject.SetActive(true);
@@ -1090,6 +1111,7 @@ public class UI : MonoBehaviour
         Vector3 center = activeSpawnArea.position;
 
         Transform activeObstacle = GetDefaultObstacle();
+        float obstacleSpawnPadding = Mathf.Max(uiObstacleRad, AgentObstacleClearance());
 
         if (selectedSpawnType == AgentSpawnType.Spiral)
         {
@@ -1110,7 +1132,7 @@ public class UI : MonoBehaviour
                 Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                 bool valid = true;
-                if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+                if (IsTooCloseToObstacle(spawnPos, activeObstacle, obstacleSpawnPadding)) valid = false;
 
                 if (valid)
                 {
@@ -1138,7 +1160,7 @@ public class UI : MonoBehaviour
                 Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                 bool valid = true;
-                if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+                if (IsTooCloseToObstacle(spawnPos, activeObstacle, obstacleSpawnPadding)) valid = false;
 
                 if (valid)
                 {
@@ -1180,7 +1202,7 @@ public class UI : MonoBehaviour
                 if (spawned == 0)
                 {
                     spawnPos = new Vector3(Random.Range(min.x, max.x), Random.Range(min.y, max.y), center.z);
-                    if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+                    if (IsTooCloseToObstacle(spawnPos, activeObstacle, obstacleSpawnPadding)) valid = false;
                 }
                 else
                 {
@@ -1196,7 +1218,7 @@ public class UI : MonoBehaviour
                     {
                         valid = false;
                     }
-                    else if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad))
+                    else if (IsTooCloseToObstacle(spawnPos, activeObstacle, obstacleSpawnPadding))
                     {
                         valid = false;
                     }
@@ -1275,7 +1297,7 @@ public class UI : MonoBehaviour
                         Vector3 spawnPos = new Vector3(posX, posY, center.z);
 
                         bool valid = true;
-                        if (IsTooCloseToObstacle(spawnPos, activeObstacle, uiObstacleRad)) valid = false;
+                        if (IsTooCloseToObstacle(spawnPos, activeObstacle, obstacleSpawnPadding)) valid = false;
 
                         if (valid)
                         {
@@ -1307,6 +1329,15 @@ public class UI : MonoBehaviour
 
         Transform defaultObstacle = GetDefaultObstacle();
         if (defaultObstacle != null) DrawObstacleGizmos(defaultObstacle, uiObstacleRad);
+    }
+
+    private float AgentObstacleClearance()
+    {
+        CircleCollider2D circle = agentPrefab.GetComponent<CircleCollider2D>();
+        if (circle == null) return 0f;
+        Vector3 scale = circle.transform.lossyScale;
+        return circle.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y)) +
+            ((Vector2)circle.transform.TransformVector(circle.offset)).magnitude + 0.001f;
     }
 
     private bool IsTooCloseToObstacle(Vector3 point, Transform obstacleTransform, float padding)
@@ -1579,7 +1610,15 @@ public class UI : MonoBehaviour
 
         for (int i = 0; i < obstacles.Count; i++)
         {
-            if (obstacles[i] != null) obstacles[i].gameObject.SetActive(i == 0);
+            if (obstacles[i] == null) continue;
+            bool active = i == 0;
+            obstacles[i].gameObject.SetActive(active);
+            if (active)
+            {
+                // Non-simulated bodies hide their colliders from ClosestPoint and cast queries.
+                foreach (Rigidbody2D body in obstacles[i].GetComponentsInChildren<Rigidbody2D>())
+                    body.simulated = true;
+            }
         }
     }
 }

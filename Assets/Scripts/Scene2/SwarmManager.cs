@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Advances the swarm simulation and updates its goal, density, and perception displays.</summary>
 public class SwarmManager : MonoBehaviour
 {
     [Header("Swarm Elements")]
@@ -15,6 +16,10 @@ public class SwarmManager : MonoBehaviour
     [Header("Density")]
     [Tooltip("Tracks how spread out the swarm is against a baseline. Provisioned by UI.cs if left empty.")]
     public SwarmDensityMonitor densityMonitor;
+
+    [Header("Behavior Version")]
+    [Tooltip("Selected by UI.cs. Densification V2 uses center-distance neighbours and local avoidance, without common fate attraction.")]
+    public bool useDensificationV2 = false;
 
     [Header("Swarm Parameters")]
     public float cohesionIntensity = 5.0f;    // cI

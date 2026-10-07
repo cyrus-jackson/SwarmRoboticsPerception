@@ -20,15 +20,18 @@ internal sealed class FlockGridCapture
     /// Motion type for the file name. Defaults to "flocking" so existing callers are unchanged;
     /// AllGridManager passes its own, otherwise a Dispersion grid would save as a flocking one.
     /// </param>
-    public void Start(float speed, float perception, string label = "flocking")
+    public void Start(float speed, float perception, string label = "flocking", string outputFolder = null, bool includeParameters = true)
     {
-        string folder = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Grid Recordings"));
+        string folder = Path.GetFullPath(outputFolder ?? Path.Combine(Application.dataPath, "..", "Grid Recordings"));
         Directory.CreateDirectory(folder);
         if (string.IsNullOrWhiteSpace(label)) label = "grid";
 
-        string name = string.Format(CultureInfo.InvariantCulture,
+        foreach (char invalid in Path.GetInvalidFileNameChars()) label = label.Replace(invalid, '_');
+        string name = includeParameters ? string.Format(CultureInfo.InvariantCulture,
             "{4}_grid_speed_{0:0.00}_perception_{1:0.00}_{2:yyyyMMdd_HHmmss_fff}_{3}",
-            speed, perception, DateTime.Now, Guid.NewGuid().ToString("N").Substring(0, 8), label);
+            speed, perception, DateTime.Now, Guid.NewGuid().ToString("N").Substring(0, 8), label)
+            : string.Format(CultureInfo.InvariantCulture, "{0}_grid_{1:yyyyMMdd_HHmmss_fff}_{2}",
+                label, DateTime.Now, Guid.NewGuid().ToString("N").Substring(0, 8));
         FinalPath = Path.Combine(folder, name + ".mp4");
         workingPath = Path.Combine(folder, name + "_partial.mp4");
 

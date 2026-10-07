@@ -62,7 +62,9 @@ public enum RecordingEndCondition
     /// <summary>Stop once wallContactAgentPercent of unique spawned agents have touched any wall during capture.</summary>
     WallContactReached,
     /// <summary>Random only: record for the mean motion duration of the other completed clips in this batch.</summary>
-    AverageOtherMotionDuration
+    AverageOtherMotionDuration,
+    /// <summary>Stop when local spacing is stable for a sustained period, with an optional low-speed requirement.</summary>
+    MotionSettled
 }
 
 /// <summary>What <c>densityTargetRatio</c> is a ratio of.</summary>
@@ -149,6 +151,30 @@ public class SimRecorder : MonoBehaviour
         [Tooltip("SpreadSettled: seconds the slope must stay inside the limit before the run counts as settled. Also used by the no-randomness reference run when the density ratio is measured against it.")]
         public float settleHoldTime = 3f;
 
+        [Tooltip("MotionSettled: seconds of local spacing history to check for stability.")]
+        public float motionSettleWindowSeconds = 3f;
+
+        [Tooltip("MotionSettled: maximum spacing range in the window, as a fraction of the starting mean 3-neighbour distance.")]
+        [Range(0f, 1f)]
+        public float motionSettleSpacingTolerance = 0.01f;
+
+        [Tooltip("MotionSettled: also require every agent to move slowly. Leave off for density equilibrium with residual motion or randomness.")]
+        public bool motionSettleRequireLowSpeed = false;
+
+        [Tooltip("MotionSettled: when Require Low Speed is enabled, every agent must move at or below this fraction of Max Speed.")]
+        [Range(0f, 1f)]
+        public float motionSettleSpeedFraction = 0.02f;
+
+        [Tooltip("MotionSettled: seconds that stable spacing and the optional low-speed check must hold.")]
+        public float motionSettleHoldSeconds = 3f;
+
+        [Tooltip("MotionSettled: earliest recording time at which settling can end the clip.")]
+        public float motionSettleMinimumRunSeconds = 5f;
+
+        [Tooltip("MotionSettled: spacing reduction required to label the result settled after contraction. Otherwise it is settled without contraction.")]
+        [Range(0f, 1f)]
+        public float motionSettleContractionFraction = 0.05f;
+
         [Tooltip("Optional per-type maximum recording length. Leave at 0 to use the global recordingTimePerSim.")]
         public float overrideRecordingTime = 0f;
     }
@@ -219,6 +245,19 @@ public class SimRecorder : MonoBehaviour
         public int wallContactTrackedAgents;
         public int uniqueAgentsHitWallsAtEnd;
         public float percentAgentsHitWallsAtEnd;
+        public bool motionSettleRequireLowSpeed;
+        public float motionSettleWindowSeconds;
+        public float motionSettleSpacingTolerance;
+        public float motionSettleSpeedFraction;
+        public float motionSettleHoldSeconds;
+        public float motionSettleMinimumRunSeconds;
+        public float motionSettleContractionFraction;
+        public float settlingSpacingBaseline;
+        public float settlingSpacingAtTermination;
+        public float settlingSpacingRange;
+        public float settlingMaxSpeedAtTermination;
+        public float settlingSpeedLimit;
+        public bool settledWithContraction;
         public float videoFinishedOverlaySeconds;    // length of the "Video Finished" card
         public float totalClipDuration;              // recordedDuration + overlay
     }
@@ -254,13 +293,14 @@ public class SimRecorder : MonoBehaviour
     public string saveFolder = "SimulationRecordings";
 
     [Header("Recording Rules (per motion type)")]
-    [Tooltip("Start delay and end condition for each motion type. A type with no entry records immediately for the full duration.")]
+    [Tooltip("Start delay and end condition for each motion type. Missing types record immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
         new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.3f, recordingEndDelay = 3f },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.AverageOtherMotionDuration },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 3f }
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 3f },
+        CreateDensificationV2RecordingSettings()
     };
 
     [Tooltip("Draw the parameter and hull area line in the top left of the recorded video. ")]
@@ -292,11 +332,11 @@ public class SimRecorder : MonoBehaviour
     public int param2Iterations = 4;
 
     [Header("SwarmType + Parameter Batch")]
-    public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Dispersion, SwarmType.Random };
-    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.PerceptionRad;
-    public float swarmTypeParamStart = 1.5f;
-    public float swarmTypeParamStep = 1f;
-    public int swarmTypeParamIterations = 4;
+    public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.DensificationV2 };
+    public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.Cohesion;
+    public float swarmTypeParamStart = 1.0f;
+    public float swarmTypeParamStep = 0.5f;
+    public int swarmTypeParamIterations = 10;
 
     [Header("Combinations Batch")]
     [Tooltip("Record every combination once per saved spawn layout, using the layouts named in 'Reuse Spawn Layouts' below. Off means a fresh random spawn per clip. NoRandomnessReference works in either mode: missing references are measured in an unrecorded zero-randomness run from the clip's exact starting layout. Fresh clips are not paired across parameter values.")]
@@ -309,7 +349,7 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Record the no-randomness reference runs (mp4 + trajectory json) into a NoRandomnessReferences child folder of the batch, with their own batch_config.json. Off measures them unrecorded.")]
     public bool saveNoRandomnessReferences = true;
 
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Densification, SwarmType.Dispersion, SwarmType.Random };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.DensificationV2 };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     [Tooltip("RandomMovement sweep values are added to a base of 60 for Random motion only. For all other motion types and parameters, values are used directly. This applies to any of the three parameter axes.")]
     public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
@@ -328,12 +368,12 @@ public class SimRecorder : MonoBehaviour
     public bool saveSpawnLayouts = true;
 
     [Tooltip("Optional. Names of saved layouts to load instead of generating fresh ones, e.g. layout_00. Leave empty to generate.")]
-    public List<string> reuseSpawnLayouts = new List<string> { };
+    public List<string> reuseSpawnLayouts = new List<string> { "20261007_114900_layout_00" };
 
     [Header("Single Parameter Batch")]
-    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.PerceptionRad;
-    public float singleParamStart = 2.15f;
-    public float singleParamStep = 0.25f;
+    public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.Cohesion;
+    public float singleParamStart = 6.0f;
+    public float singleParamStep = 0.50f;
     public int singleParamIterations = 8;
 
     [Header("Obstacle Batch (Obstacle List + 1 Parameter)")]
@@ -393,6 +433,8 @@ public class SimRecorder : MonoBehaviour
     // Word at the front of the on-screen line: "Recording" while the window is open, "Video Ended"
     // for the closing frames, so the mp4 says for itself where it stopped.
     private string overlayStatus = "Recording";
+    private GUIStyle recordingOverlayStyle;
+    private GUIStyle recordingOverlayShadowStyle;
 
     private int lastClusterCountAtStart;
     private int lastClusterCountAtEnd;
@@ -410,6 +452,9 @@ public class SimRecorder : MonoBehaviour
     private string lastDensityBaselineSource = "recording start";
 
     private readonly SpreadSettleDetector settleDetector = new SpreadSettleDetector();
+    private readonly MotionSettleDetector motionSettleDetector = new MotionSettleDetector();
+    private readonly List<Vector2> motionSettlePositions = new List<Vector2>();
+    private MotionTypeRecordingSettings lastMotionSettleSettings;
     private string lastWallsDisabled = "";
 
     // Set while a matched start batch is running, so each clip records which layout it began from.
@@ -431,9 +476,21 @@ public class SimRecorder : MonoBehaviour
     private bool videoFinishedOverlayActive = false;
     private Texture2D blackOverlayTexture;
 
+    private static MotionTypeRecordingSettings CreateDensificationV2RecordingSettings()
+    {
+        return new MotionTypeRecordingSettings
+        {
+            swarmType = SwarmType.DensificationV2,
+            recordingStartDelay = 0f,
+            endCondition = RecordingEndCondition.FixedDuration,
+            densityMetric = SwarmDensityMetric.MeanKnnDistance,
+            endConditionDwellTime = 0f,
+            recordingEndDelay = 0f
+        };
+    }
+
     /// <summary>
-    /// Returns the recording rules configured for a motion type, or a no-delay / FixedDuration
-    /// default when the type has no entry in the list.
+    /// Returns configured recording rules, with a no-delay / FixedDuration fallback for missing types.
     /// </summary>
     public MotionTypeRecordingSettings GetSettingsFor(SwarmType type)
     {
@@ -444,6 +501,8 @@ public class SimRecorder : MonoBehaviour
                 if (entry != null && entry.swarmType == type) return entry;
             }
         }
+
+        if (type == SwarmType.DensificationV2) return CreateDensificationV2RecordingSettings();
 
         return new MotionTypeRecordingSettings { swarmType = type, recordingStartDelay = 0f, endCondition = RecordingEndCondition.FixedDuration };
     }
@@ -707,7 +766,8 @@ public class SimRecorder : MonoBehaviour
         if (swarmManager == null) return 0;
 
         SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
-                                         clusterSizeBuffer, swarmManager.AgentColliders);
+                                         clusterSizeBuffer, swarmManager.AgentColliders,
+                                         !swarmManager.useDensificationV2);
 
         return minClusterSize <= 1
             ? clusterSizeBuffer.Count
@@ -803,6 +863,11 @@ public class SimRecorder : MonoBehaviour
                          + $"{entry.minClusterSize}+";
                     break;
 
+                case RecordingEndCondition.MotionSettled:
+                    rule = $"MotionSettled[3NN range <= {entry.motionSettleSpacingTolerance:P0} of start over {entry.motionSettleWindowSeconds:F1}s, " +
+                           (entry.motionSettleRequireLowSpeed ? $"speed <= {entry.motionSettleSpeedFraction:P0} of max, " : "density equilibrium, ") +
+                           $"held {entry.motionSettleHoldSeconds:F1}s, min {entry.motionSettleMinimumRunSeconds:F1}s]";
+                    break;
                 case RecordingEndCondition.SpreadSettled:
                     rule = $"SpreadSettled@{entry.settleTolerance:P0}/s held {entry.settleHoldTime:F1}s";
                     break;
@@ -821,7 +886,7 @@ public class SimRecorder : MonoBehaviour
                 description += $" (max {entry.overrideRecordingTime:F1}s)";
             }
 
-            if (!usesAverageDuration && entry.endConditionDwellTime > 0f)
+            if (!usesAverageDuration && entry.endCondition != RecordingEndCondition.MotionSettled && entry.endConditionDwellTime > 0f)
             {
                 description += $" (dwell {entry.endConditionDwellTime:F2}s)";
             }
@@ -1074,9 +1139,40 @@ public class SimRecorder : MonoBehaviour
             }
         }
 
-        // The condition must hold continuously for this long before the clip ends, so a swarm whose
-        // hull oscillates cannot stop a recording on a momentary spike.
-        float dwellRequired = averageDurationEnabled ? 0f : Mathf.Max(0f, settings.endConditionDwellTime);
+        bool wantsMotionSettle = settings.endCondition == RecordingEndCondition.MotionSettled;
+        bool motionSettleEnabled = wantsMotionSettle && swarmManager != null;
+        lastMotionSettleSettings = null;
+        motionSettleDetector.Reset(0f);
+        float motionSpacing = 0f;
+        float nextMotionSpacingSample = 0f;
+        float motionSpeedLimit = runMaxSpeed * Mathf.Clamp01(settings.motionSettleSpeedFraction);
+        if (motionSettleEnabled)
+        {
+            motionSpacing = MeasureSettlingSpacing();
+            motionSettleEnabled = motionSettlePositions.Count >= 2;
+            if (motionSettleEnabled)
+            {
+                motionSettleDetector.requireLowSpeed = settings.motionSettleRequireLowSpeed;
+                motionSettleDetector.windowSeconds = Mathf.Max(0.01f, settings.motionSettleWindowSeconds);
+                motionSettleDetector.spacingTolerance = Mathf.Clamp01(settings.motionSettleSpacingTolerance);
+                motionSettleDetector.holdSeconds = Mathf.Max(0f, settings.motionSettleHoldSeconds);
+                motionSettleDetector.minimumRunSeconds = Mathf.Max(0f, settings.motionSettleMinimumRunSeconds);
+                motionSettleDetector.contractionFraction = Mathf.Clamp01(settings.motionSettleContractionFraction);
+                motionSettleDetector.Reset(motionSpacing);
+                motionSettleDetector.Push(0f, motionSpacing, MaximumAgentSpeed(), motionSpeedLimit);
+                lastMotionSettleSettings = settings;
+                clusterBaseline = CountClusters(settings.minClusterSize);
+            }
+        }
+        if (wantsMotionSettle && !motionSettleEnabled)
+        {
+            Debug.LogWarning($"[SimRecorder] {swarmType}: MotionSettled needs at least two agents " +
+                             $"and a swarm manager; falling back to the {maxTime:F2}s duration.");
+        }
+
+        // MotionSettled owns its combined dwell; other rules retain their existing dwell.
+        float dwellRequired = averageDurationEnabled || wantsMotionSettle
+            ? 0f : Mathf.Max(0f, settings.endConditionDwellTime);
         float heldFor = 0f;
 
         lastEndReason = "timeout";
@@ -1090,7 +1186,7 @@ public class SimRecorder : MonoBehaviour
         lastEndConditionPercent = wantsGoalCondition ? settings.goalAreaAgentPercent : 0f;
         lastMaxRecordingTime = maxTime;
         lastAbsoluteAreaTarget = wantsAbsoluteArea ? settings.absoluteHullAreaTarget : 0f;
-        lastDwellTime = dwellRequired;
+        lastDwellTime = motionSettleEnabled ? motionSettleDetector.holdSeconds : dwellRequired;
 
         if (wantsGoalCondition && goalArea == null)
         {
@@ -1141,7 +1237,32 @@ public class SimRecorder : MonoBehaviour
                 spreadSettled = settleDetector.Push(timer, densityMonitor.CurrentValue);
             }
 
-            if (spreadSettled)
+            bool motionSettled = false;
+            if (motionSettleEnabled)
+            {
+                if (timer >= nextMotionSpacingSample)
+                {
+                    motionSpacing = MeasureSettlingSpacing();
+                    nextMotionSpacingSample = timer + Mathf.Min(0.1f, motionSettleDetector.windowSeconds / 2f);
+                }
+                motionSettled = motionSettleDetector.Push(timer, motionSpacing,
+                    MaximumAgentSpeed(), motionSpeedLimit);
+            }
+
+            if (motionSettled)
+            {
+                conditionMet = true;
+                string settledPrefix = motionSettleDetector.requireLowSpeed ? "settled" : "density-settled";
+                reason = settledPrefix + (motionSettleDetector.HasContracted
+                    ? "-after-contraction" : "-without-contraction");
+                detail = $"local spacing settled at {motionSettleDetector.Spacing:F3} " +
+                         $"(start {motionSettleDetector.Baseline:F3}, range {motionSettleDetector.SpacingRange:F3}), " +
+                         (motionSettleDetector.requireLowSpeed
+                             ? $"maximum speed {motionSettleDetector.MaxAgentSpeed:F3} <= {motionSpeedLimit:F3}, "
+                             : $"residual maximum speed {motionSettleDetector.MaxAgentSpeed:F3} (not a stop constraint), ") +
+                         $"held {motionSettleDetector.HeldFor:F2}s";
+            }
+            else if (spreadSettled)
             {
                 conditionMet = true;
                 reason = "spread-settled";
@@ -1270,7 +1391,8 @@ public class SimRecorder : MonoBehaviour
 
         // Store the settled value now the window has closed, so the randomised runs that follow in
         // this batch can be measured against it.
-        if (isReferenceRun && (!referenceMustSettle || lastEndReason == "spread-settled"))
+        if (isReferenceRun && (!referenceMustSettle || lastEndReason == "spread-settled") &&
+            (!wantsMotionSettle || motionSettleDetector.IsSettled))
         {
             StoreReferenceValue(perceptionRadius, runMaxSpeed);
         }
@@ -1295,7 +1417,13 @@ public class SimRecorder : MonoBehaviour
             string goalSuffix = goalArea != null
                 ? $" — goal area '{goalArea.name}' held {lastAgentsInsideGoalArea}/{goalArea.TrackedAgents} agents ({lastPercentInsideGoalArea:F1}%)."
                 : ".";
-            Debug.Log($"[SimRecorder] {swarmType}: recording hit the {maxTime:F2}s duration{goalSuffix}");
+            string settleSuffix = motionSettleEnabled
+                ? $" Spacing range {motionSettleDetector.SpacingRange:F4}/{motionSettleDetector.spacingTolerance * motionSettleDetector.Baseline:F4} " +
+                  $"over {motionSettleDetector.windowSeconds:F1}s; hold {motionSettleDetector.HeldFor:F2}/{motionSettleDetector.holdSeconds:F2}s; " +
+                  $"max speed {motionSettleDetector.MaxAgentSpeed:F3}/{motionSettleDetector.SpeedLimit:F3} " +
+                  $"(required: {motionSettleDetector.requireLowSpeed})."
+                : string.Empty;
+            Debug.Log($"[SimRecorder] {swarmType}: recording hit the {maxTime:F2}s duration{goalSuffix}{settleSuffix}");
         }
 
         // Hold the "Video Finished" card while still recording so it is baked into the clip.
@@ -1324,6 +1452,33 @@ public class SimRecorder : MonoBehaviour
                 ? trajectory.StopCaptureAndSaveToManualFolder(outputFileName)
                 : trajectory.StopCaptureAndSave(outputFolder, outputFileName);
         }
+    }
+
+    private float MeasureSettlingSpacing()
+    {
+        SwarmDensityMetrics.CollectPositions(swarmManager.agents, motionSettlePositions);
+        return SwarmDensityMetrics.MeanKnnDistance(motionSettlePositions, 3);
+    }
+
+    private float MaximumAgentSpeed()
+    {
+        GameObject[] agents = swarmManager.agents;
+        SwarmAgent[] scripts = swarmManager.AgentScripts;
+        if (agents == null) return float.PositiveInfinity;
+
+        float maximum = 0f;
+        int count = 0;
+        for (int i = 0; i < agents.Length; i++)
+        {
+            if (agents[i] == null) continue;
+            SwarmAgent agent = i < scripts.Length ? scripts[i] : null;
+            if (agent == null) return float.PositiveInfinity;
+            float speed = agent.Velocity.magnitude;
+            if (float.IsNaN(speed) || float.IsInfinity(speed)) return float.PositiveInfinity;
+            maximum = Mathf.Max(maximum, speed);
+            count++;
+        }
+        return count >= 2 ? maximum : float.PositiveInfinity;
     }
 
     /// <summary>The trajectory recorder in play, preferring the one the UI provisioned.</summary>
@@ -1390,6 +1545,20 @@ public class SimRecorder : MonoBehaviour
         config.maxRecordingTime = lastMaxRecordingTime;
         config.agentsInsideGoalAreaAtEnd = lastAgentsInsideGoalArea;
         config.percentInsideGoalAreaAtEnd = lastPercentInsideGoalArea;
+        MotionTypeRecordingSettings motionSettings = lastMotionSettleSettings;
+        config.motionSettleRequireLowSpeed = motionSettings != null && motionSettleDetector.requireLowSpeed;
+        config.motionSettleWindowSeconds = motionSettings != null ? motionSettleDetector.windowSeconds : 0f;
+        config.motionSettleSpacingTolerance = motionSettings != null ? motionSettleDetector.spacingTolerance : 0f;
+        config.motionSettleSpeedFraction = motionSettings != null ? Mathf.Clamp01(motionSettings.motionSettleSpeedFraction) : 0f;
+        config.motionSettleHoldSeconds = motionSettings != null ? motionSettleDetector.holdSeconds : 0f;
+        config.motionSettleMinimumRunSeconds = motionSettings != null ? motionSettleDetector.minimumRunSeconds : 0f;
+        config.motionSettleContractionFraction = motionSettings != null ? motionSettleDetector.contractionFraction : 0f;
+        config.settlingSpacingBaseline = motionSettings != null ? motionSettleDetector.Baseline : 0f;
+        config.settlingSpacingAtTermination = motionSettings != null ? motionSettleDetector.Spacing : 0f;
+        config.settlingSpacingRange = motionSettings != null ? motionSettleDetector.SpacingRange : 0f;
+        config.settlingMaxSpeedAtTermination = motionSettings != null ? motionSettleDetector.MaxAgentSpeed : 0f;
+        config.settlingSpeedLimit = motionSettings != null ? motionSettleDetector.SpeedLimit : 0f;
+        config.settledWithContraction = motionSettings != null && motionSettleDetector.IsSettled && motionSettleDetector.HasContracted;
         config.videoFinishedOverlaySeconds = lastOverlayDuration;
         config.totalClipDuration = lastRecordedDuration + lastOverlayDuration;
 
@@ -1433,15 +1602,25 @@ public class SimRecorder : MonoBehaviour
     {
         if (isRecording && !hideOverlayText)
         {
-            GUIStyle style = new GUIStyle();
-            style.fontSize = 36;
-            style.fontStyle = FontStyle.Bold;
-            style.normal.textColor = Color.black;
+            if (recordingOverlayStyle == null)
+            {
+                recordingOverlayStyle = new GUIStyle
+                {
+                    fontSize = 36,
+                    fontStyle = FontStyle.Bold,
+                    wordWrap = true
+                };
+                recordingOverlayStyle.normal.textColor = Color.black;
+                recordingOverlayShadowStyle = new GUIStyle(recordingOverlayStyle);
+                recordingOverlayShadowStyle.normal.textColor = Color.white;
+            }
 
             // Read from the manager rather than the per-batch display fields, so the line is the
             // values actually in force whichever batch type is running.
-            float random = swarmManager != null ? swarmManager.randomMovementIntensity : 0f;
+            float cohesion = swarmManager != null ? swarmManager.cohesionIntensity : 0f;
             float perception = swarmManager != null ? swarmManager.perceptionRadius : 0f;
+            float speed = swarmManager != null ? swarmManager.maxSpeed : 0f;
+            float noise = swarmManager != null ? swarmManager.randomMovementIntensity : 0f;
 
             // Distinct agents that have reached this motion type's goal area at any point, not the
             // number standing in it right now. A running total is what "reached" means, and it never
@@ -1468,8 +1647,26 @@ public class SimRecorder : MonoBehaviour
                               $"({lastPercentAgentsHitWalls:F1}%)";
             }
 
-            GUI.Label(new Rect(22, 22, 1000, 50), displayText, new GUIStyle(style) { normal = { textColor = Color.white } });
-            GUI.Label(new Rect(20, 20, 1000, 50), displayText, style);
+            if (isSingleParameterBatchMode)
+            {
+                displayText = $"{overlayStatus} | Cohesion: {cohesion:F2} " +
+                              $"| Perception: {perception:F2} | Speed: {speed:F2} | Noise: {noise:F2}";
+            }
+
+            if (!isSingleParameterBatchMode && overlaySettings.endCondition == RecordingEndCondition.MotionSettled)
+            {
+                displayText += $"\nSettling | Spacing: {motionSettleDetector.Spacing:F3} " +
+                               $"| Range: {motionSettleDetector.SpacingRange:F3}/{motionSettleDetector.spacingTolerance * motionSettleDetector.Baseline:F3} " +
+                               (motionSettleDetector.requireLowSpeed
+                                   ? $"| Speed: {motionSettleDetector.MaxAgentSpeed:F3}/{motionSettleDetector.SpeedLimit:F3} "
+                                   : "| Density equilibrium ") +
+                               $"| Held: {motionSettleDetector.HeldFor:F1}/{motionSettleDetector.holdSeconds:F1}s";
+            }
+
+            float overlayWidth = Mathf.Max(1f, Screen.width - 42f);
+            float overlayHeight = recordingOverlayStyle.CalcHeight(new GUIContent(displayText), overlayWidth);
+            GUI.Label(new Rect(22, 22, overlayWidth, overlayHeight), displayText, recordingOverlayShadowStyle);
+            GUI.Label(new Rect(20, 20, overlayWidth, overlayHeight), displayText, recordingOverlayStyle);
         }
 
         // Drawn last so it covers the parameter overlay text as well.

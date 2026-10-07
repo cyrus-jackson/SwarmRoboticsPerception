@@ -6,13 +6,7 @@ using UnityEngine;
 using UnityEngine.Video;
 
 /// <summary>
-/// Displays every recorded spawn layout for one condition — one motion type at one speed,
-/// perception radius and randomness — in a synchronized video grid.
-///
-/// The same grid as <see cref="FlockGridManager"/>, which is left in place and unchanged, with the
-/// motion type chosen in the Inspector instead of fixed to flocking. Clips are matched by reading
-/// their file names, so any motion type SimRecorder produces works, with whatever number of spawn
-/// layouts that condition happens to have.
+/// Plays and captures synchronized video grids selected by recording conditions or an explicit batch plan.
 /// </summary>
 [DisallowMultipleComponent]
 public class AllGridManager : MonoBehaviour
@@ -49,7 +43,7 @@ public class AllGridManager : MonoBehaviour
     [Min(1)] public float prepareTimeout = 60f;
 
     [Header("Grid recording")]
-    [Tooltip("Record one complete iteration as a 1080p MP4 in the project's Grid Recordings folder. Checking during playback restarts the grid first. Resets when finished; Unity Editor only.")]
+    [Tooltip("Record one complete iteration as a 1080p MP4 in Grid Recordings/<source folder name>. An existing destination folder skips recording. Checking during playback restarts the grid first. Unity Editor only.")]
     public bool recordOneIteration;
 
     [Header("Render textures")]
@@ -59,6 +53,7 @@ public class AllGridManager : MonoBehaviour
     public bool HasFailed => failed;
     public string LastError { get; private set; }
     public string LastRecordingPath { get; private set; }
+    public bool HasFinishedPlayback => built && !failed && !waiting && cells.Count > 0 && cells.TrueForAll(cell => cell.finished);
 
     /// <summary>Tracks the video resources and playback state owned by one layout cell.</summary>
     private sealed class Cell
@@ -94,6 +89,8 @@ public class AllGridManager : MonoBehaviour
     private float lastSpacing;
     private bool recordToggleState;
     private bool recordingPending;
+    private string batchOutputFolder;
+    private AllRecordingCatalog.Grid selectedGrid;
     private int recordingEndFrame = -1;
 #if UNITY_EDITOR
     private FlockGridCapture capture;
@@ -101,7 +98,8 @@ public class AllGridManager : MonoBehaviour
 
     private void Start()
     {
-        if (!built) BuildGrid();
+        AllGridBatchManager batch = GetComponent<AllGridBatchManager>();
+        if (!built && (batch == null || !batch.isActiveAndEnabled)) BuildGrid();
     }
 
     [ContextMenu("Build / Reload Grid")]
@@ -129,14 +127,15 @@ public class AllGridManager : MonoBehaviour
         CreateContainer();
         try
         {
-            string[] recordings = AllRecordingCatalog.FindRecordings(
+            string[] recordings = selectedGrid != null ? Array.ConvertAll(selectedGrid.clips, clip => clip.path) : AllRecordingCatalog.FindRecordings(
                 ResolveFolder(folderPath),
                 motionType.ToString(),
                 maxSpeed,
                 perceptionRadius,
                 anyRandomness ? double.NaN : randomMovement,
                 expectedLayouts);
-            for (int i = 0; i < recordings.Length; i++) CreateCell(recordings[i], i);
+            for (int i = 0; i < recordings.Length; i++)
+                CreateCell(recordings[i], i, selectedGrid != null ? selectedGrid.labels[i] : null);
             UpdateLayout();
             waiting = true;
             waitingSince = Time.realtimeSinceStartup;
@@ -162,6 +161,7 @@ public class AllGridManager : MonoBehaviour
             loadedAnyRandom != anyRandomness ||
             loadedExpectedLayouts != expectedLayouts)
         {
+            selectedGrid = null;
             BuildGrid();
             return;
         }
@@ -278,6 +278,18 @@ public class AllGridManager : MonoBehaviour
         }
     }
 
+    internal void SetBatchOutputFolder(string folder) => batchOutputFolder = folder;
+    internal void SetRecordingSelection(AllRecordingCatalog.Grid selection) => selectedGrid = selection;
+
+    internal static string GetRecordingFolder(string sourceFolder)
+    {
+        string source = Path.GetFullPath(ResolveFolder(sourceFolder))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string name = Path.GetFileName(source);
+        if (string.IsNullOrEmpty(name)) throw new ArgumentException("The source folder must have a name.");
+        return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Grid Recordings", name));
+    }
+
     private bool BeginCapture()
     {
         recordingPending = false;
@@ -285,10 +297,18 @@ public class AllGridManager : MonoBehaviour
 #if UNITY_EDITOR
         try
         {
+            string outputFolder = batchOutputFolder ?? GetRecordingFolder(loadedFolder);
+            if (batchOutputFolder == null && (Directory.Exists(outputFolder) || File.Exists(outputFolder)))
+            {
+                StopRecording();
+                SetHeading("Skipped: output folder already exists");
+                Debug.Log($"[AllGridManager] Skipped recording because the output folder already exists: {outputFolder}", this);
+                return false;
+            }
             capture = new FlockGridCapture();
-            string label = loadedMotionType.ToString().ToLowerInvariant() +
+            string label = selectedGrid != null ? selectedGrid.outputLabel : loadedMotionType.ToString().ToLowerInvariant() +
                 (loadedAnyRandom ? "_random_any" : "_random_" + loadedRandom.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
-            capture.Start(loadedSpeed, loadedPerception, label);
+            capture.Start(loadedSpeed, loadedPerception, label, outputFolder, includeParameters: selectedGrid == null);
             SetHeading("Recording one iteration");
             Debug.Log($"[AllGridManager] Recording one iteration to {capture.FinalPath}", this);
             return true;
@@ -382,8 +402,9 @@ public class AllGridManager : MonoBehaviour
         Canvas.ForceUpdateCanvases();
     }
 
-    private void CreateCell(string path, int layout)
+    private void CreateCell(string path, int layout, string label = null)
     {
+        string cellTitle = label ?? $"Layout {layout:00}";
         GameObject element = new GameObject($"Layout_{layout:00}", typeof(RectTransform));
         element.transform.SetParent(content, false);
         UnityEngine.UI.Image background = element.AddComponent<UnityEngine.UI.Image>();
@@ -392,7 +413,7 @@ public class AllGridManager : MonoBehaviour
         Cell cell = new Cell();
         cells.Add(cell);
         cell.label = CreateLabel("Layout", element.transform, 16);
-        cell.label.text = $"Layout {layout:00}";
+        cell.label.text = cellTitle;
         RectTransform labelRect = cell.label.rectTransform;
         labelRect.anchorMin = new Vector2(0, 1);
         labelRect.anchorMax = Vector2.one;
@@ -432,14 +453,14 @@ public class AllGridManager : MonoBehaviour
         cell.player.loopPointReached += player =>
         {
             cell.finished = true;
-            cell.label.text = $"Layout {layout:00} · ended";
+            cell.label.text = cellTitle + " · ended";
         };
-        cell.player.started += player => cell.label.text = $"Layout {layout:00}";
+        cell.player.started += player => cell.label.text = cellTitle;
         cell.player.errorReceived += (player, message) =>
         {
-            cell.label.text = $"Layout {layout:00} · error";
+            cell.label.text = cellTitle + " · error";
             cell.label.color = new Color(1, 0.45f, 0.4f);
-            Fail($"Layout {layout:00}: {message}");
+            Fail($"{cellTitle}: {message}");
         };
     }
 
@@ -463,6 +484,12 @@ public class AllGridManager : MonoBehaviour
     private void SetHeading(string status)
     {
         if (heading == null) return;
+
+        if (selectedGrid != null)
+        {
+            heading.text = $"{selectedGrid.title} · {cells.Count} videos · {status}";
+            return;
+        }
 
         string randomText = loadedAnyRandom ? "any randomness" : $"Random {loadedRandom:0.##}";
         heading.text = $"{loadedMotionType} · Speed {loadedSpeed:0.##} · Perception {loadedPerception:0.##} " +

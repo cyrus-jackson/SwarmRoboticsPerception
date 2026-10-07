@@ -5,28 +5,14 @@ using System.IO;
 using System.Linq;
 
 /// <summary>
-/// Finds the recorded clips for one condition — one motion type at one randomness, perception
-/// radius and max speed — and returns them ordered by spawn layout.
-///
-/// <see cref="FlockRecordingCatalog"/> answers the same question for flocking only, with a fixed
-/// regex and a hard requirement of forty layouts. This is the general form, used by
-/// <see cref="AllGridManager"/>; the flocking pair is left alone so existing scenes keep behaving
-/// exactly as they did.
-///
-/// Names are read key by key rather than by a fixed pattern:
-///
-///   type_flocking_randommovement_0.00_perceptionrad_4.00_maxspeed_3.00_20260908_013309_layout_07
-///
-/// SimRecorder builds that name from whichever parameters a batch happened to sweep, so their
-/// order and which of them appear both vary between batches. A positional regex only fits the
-/// batch it was written for; reading `key_value` pairs fits any of them.
+/// Selects recording conditions and plans comparison grids from batch metadata or video filenames.
 /// </summary>
 public static class AllRecordingCatalog
 {
     /// <summary>Tolerance for matching a recorded parameter against a requested one.</summary>
     private const double Tolerance = 0.0001;
 
-    /// <summary>Parameters read out of one file name. NaN means the key was absent.</summary>
+    /// <summary>Video parameters from a filename or manifest, with missing filename values marked NaN.</summary>
     public sealed class Clip
     {
         public string path;
@@ -36,7 +22,190 @@ public static class AllRecordingCatalog
         public double random = double.NaN;
         public double perception = double.NaN;
         public double maxSpeed = double.NaN;
+        public string parameter1;
+        public string parameter2;
+        public string parameter3;
+        public double parameter1Value;
+        public double parameter2Value;
+        public double parameter3Value;
+        public string obstacleName;
+        public string obstacleSpawnLocationName;
+        public readonly Dictionary<string, double> parameters = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>Reads the recording index saved by SimRecorder without requiring trajectory files.</summary>
+    [Serializable]
+    public sealed class Batch
+    {
+        public string batchType;
+        public Recording[] simulations;
+    }
+
+    /// <summary>Maps one manifest entry to its video, starting layout, and simulation parameters.</summary>
+    [Serializable]
+    public sealed class Recording
+    {
+        public string fileName;
+        public string swarmType;
+        public string spawnLayoutId;
+        public string parameter1;
+        public string parameter2;
+        public string parameter3;
+        public double parameter1Value;
+        public double parameter2Value;
+        public double parameter3Value;
+        public string obstacleName;
+        public string obstacleSpawnLocationName;
+        public double randomMovement;
+        public double perceptionRadius;
+        public double maxSpeed;
+        public double cohesion;
+        public double separation;
+        public double alignment;
+        public double friction;
+        public double overlapAvoidance;
+        public double safetyDistance;
+        public double envAvoidance;
+        public double obstacleRadius;
+    }
+
+    /// <summary>Describes the exact videos and labels to display and capture together.</summary>
+    public sealed class Grid
+    {
+        public Clip[] clips;
+        public string title;
+        public string outputLabel;
+        public string[] labels;
+    }
+
+    public static Grid[] PlanGrids(string folder, Batch batch = null)
+    {
+        if (!Directory.Exists(folder)) throw new DirectoryNotFoundException($"Recording folder not found: {folder}");
+        folder = Path.GetFullPath(folder);
+        string[] videos = Directory.EnumerateFiles(folder)
+            .Where(path => string.Equals(Path.GetExtension(path), ".mp4", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.Ordinal).ToArray();
+        if (videos.Length == 0) throw new InvalidDataException($"No MP4 videos were found in {folder}.");
+        var metadata = new Dictionary<string, Recording>(StringComparer.OrdinalIgnoreCase);
+        if (batch != null)
+        {
+            if (batch.simulations == null || batch.simulations.Length == 0)
+                throw new InvalidDataException("batch_config.json contains no simulation entries.");
+            var names = new HashSet<string>(videos.Select(Path.GetFileNameWithoutExtension), StringComparer.OrdinalIgnoreCase);
+            foreach (Recording recording in batch.simulations)
+            {
+                if (recording == null || string.IsNullOrWhiteSpace(recording.fileName))
+                    throw new InvalidDataException("batch_config.json contains an entry without a video filename.");
+                string name = recording.fileName.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+                    ? recording.fileName.Substring(0, recording.fileName.Length - 4) : recording.fileName;
+                if (!names.Contains(name)) throw new InvalidDataException($"Manifest video is missing: {name}.mp4");
+                if (metadata.ContainsKey(name)) throw new InvalidDataException($"Duplicate manifest video: {name}");
+                metadata.Add(name, recording);
+            }
+        }
+
+        List<Clip> clips = videos.Select(path => metadata.TryGetValue(Path.GetFileNameWithoutExtension(path), out Recording recording)
+            ? FromRecording(path, recording) : Parse(path) ?? new Clip { path = path }).ToList();
+        bool combinations = batch != null && (batch.batchType ?? "").StartsWith("combinations", StringComparison.OrdinalIgnoreCase);
+        bool matchedStarts = string.Equals(batch?.batchType, "matched-start", StringComparison.OrdinalIgnoreCase);
+        bool filenameConditions = batch == null && clips.All(clip => !string.IsNullOrEmpty(clip.swarmType) &&
+            IsUsable(clip.maxSpeed) && IsUsable(clip.perception) && !double.IsNaN(clip.random));
+
+        return clips.GroupBy(clip => batch != null && metadata.ContainsKey(Path.GetFileNameWithoutExtension(clip.path))
+                ? ConditionKey(clip, !combinations) + (matchedStarts ? "|layout=" + clip.layoutId : "")
+                : filenameConditions ? $"{clip.swarmType}|{ValueKey(clip.random)}|{ValueKey(clip.maxSpeed)}|{ValueKey(clip.perception)}"
+                : "unindexed")
+            .Select((group, index) =>
+            {
+                Clip[] ordered = group.OrderBy(clip => clip.parameter1Value).ThenBy(clip => clip.parameter2Value)
+                    .ThenBy(clip => clip.parameter3Value).ThenBy(clip => clip.layoutIndex)
+                    .ThenBy(clip => clip.path, StringComparer.Ordinal).ToArray();
+                Clip first = ordered[0];
+                string motion = !string.IsNullOrEmpty(first.swarmType) && ordered.All(clip =>
+                    string.Equals(clip.swarmType, first.swarmType, StringComparison.OrdinalIgnoreCase)) ? first.swarmType : "Videos";
+                string sweep = !combinations && batch != null
+                    ? string.Join(" / ", new[] { first.parameter1, first.parameter2, first.parameter3 }.Where(IsSweepParameter)) : "";
+                string details = string.IsNullOrEmpty(sweep) ? "" : $" · {sweep} comparison";
+                if (combinations)
+                {
+                    var axes = new[] { (first.parameter1, first.parameter1Value), (first.parameter2, first.parameter2Value), (first.parameter3, first.parameter3Value) };
+                    foreach (var axis in axes.Where(axis => IsSweepParameter(axis.Item1) && axis.Item1 != "RandomMovement" &&
+                        axis.Item1 != "MaxSpeed" && axis.Item1 != "PerceptionRad"))
+                        details += $" · {axis.Item1} {Number(axis.Item2)}";
+                }
+                if (matchedStarts) details += $" · {first.layoutId}";
+                if (ordered.All(clip => clip.maxSpeed == first.maxSpeed) && IsUsable(first.maxSpeed)) details += $" · Speed {Number(first.maxSpeed)}";
+                if (ordered.All(clip => clip.perception == first.perception) && IsUsable(first.perception)) details += $" · Perception {Number(first.perception)}";
+                if (ordered.All(clip => clip.random == first.random) && !double.IsNaN(first.random)) details += $" · Noise {Number(first.random)}";
+                return new Grid
+                {
+                    clips = ordered,
+                    title = motion + details,
+                    outputLabel = $"{motion}_{(string.IsNullOrEmpty(sweep) ? "condition" : sweep.Replace(" / ", "_"))}_{index + 1:00}".ToLowerInvariant(),
+                    labels = ordered.Select(clip => CellLabel(clip, combinations || filenameConditions)).ToArray()
+                };
+            }).OrderBy(grid => grid.clips[0].swarmType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(grid => grid.clips[0].random).ThenBy(grid => grid.clips[0].maxSpeed)
+            .ThenBy(grid => grid.clips[0].perception).ThenBy(grid => grid.clips[0].layoutId, StringComparer.Ordinal).ToArray();
+    }
+
+    private static Clip FromRecording(string path, Recording recording)
+    {
+        Clip clip = Parse(path) ?? new Clip { path = path };
+        if (!string.IsNullOrWhiteSpace(recording.swarmType)) clip.swarmType = recording.swarmType;
+        if (!string.IsNullOrWhiteSpace(recording.spawnLayoutId))
+        {
+            clip.layoutId = recording.spawnLayoutId;
+            clip.layoutIndex = TrailingIndex(recording.spawnLayoutId);
+        }
+        clip.random = recording.randomMovement;
+        clip.perception = recording.perceptionRadius;
+        clip.maxSpeed = recording.maxSpeed;
+        clip.parameter1 = recording.parameter1;
+        clip.parameter2 = recording.parameter2;
+        clip.parameter3 = recording.parameter3;
+        clip.parameter1Value = recording.parameter1Value;
+        clip.parameter2Value = recording.parameter2Value;
+        clip.parameter3Value = recording.parameter3Value;
+        clip.obstacleName = recording.obstacleName;
+        clip.obstacleSpawnLocationName = recording.obstacleSpawnLocationName;
+        clip.parameters["Cohesion"] = recording.cohesion;
+        clip.parameters["Separation"] = recording.separation;
+        clip.parameters["Alignment"] = recording.alignment;
+        clip.parameters["Friction"] = recording.friction;
+        clip.parameters["RandomMovement"] = recording.randomMovement;
+        clip.parameters["OverlapAvoidance"] = recording.overlapAvoidance;
+        clip.parameters["SafetyDistance"] = recording.safetyDistance;
+        clip.parameters["EnvAvoidance"] = recording.envAvoidance;
+        clip.parameters["ObstacleRadius"] = recording.obstacleRadius;
+        clip.parameters["MaxSpeed"] = recording.maxSpeed;
+        clip.parameters["PerceptionRad"] = recording.perceptionRadius;
+        return clip;
+    }
+
+    private static string ConditionKey(Clip clip, bool excludeSweep)
+    {
+        return (clip.swarmType ?? "").ToLowerInvariant() + "|" + clip.obstacleName + "|" + clip.obstacleSpawnLocationName + "|" +
+            string.Join("|", clip.parameters.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Where(pair => !excludeSweep || !(string.Equals(pair.Key, clip.parameter1, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, clip.parameter2, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, clip.parameter3, StringComparison.OrdinalIgnoreCase)))
+                .Select(pair => pair.Key + "=" + ValueKey(pair.Value)));
+    }
+
+    private static string CellLabel(Clip clip, bool layoutsOnly)
+    {
+        if (layoutsOnly && clip.layoutIndex >= 0) return $"Layout {clip.layoutIndex:00}";
+        var parameters = new[] { (clip.parameter1, clip.parameter1Value), (clip.parameter2, clip.parameter2Value), (clip.parameter3, clip.parameter3Value) };
+        string label = string.Join(" · ", parameters.Where(pair => IsSweepParameter(pair.Item1))
+            .Select(pair => $"{(pair.Item1 == "RandomMovement" ? "Noise" : pair.Item1)} {Number(pair.Item2)}"));
+        return string.IsNullOrEmpty(label) ? Path.GetFileNameWithoutExtension(clip.path) : label;
+    }
+
+    private static bool IsSweepParameter(string parameter) => !string.IsNullOrWhiteSpace(parameter) &&
+        !string.Equals(parameter, "SpawnLayout", StringComparison.OrdinalIgnoreCase);
+    private static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string ValueKey(double value) => value.ToString("R", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Every clip in <paramref name="folder"/> matching one condition, ordered by layout index.

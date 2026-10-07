@@ -8,7 +8,7 @@ public class SimRecorderEditor : Editor
 {
     private static readonly string[] EndConditionLabels =
         { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled",
-          "Cluster Count", "Wall Contact Reached", "Average Other Motions" };
+          "Cluster Count", "Wall Contact Reached", "Average Other Motions", "Motion Settled" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
     private const int AbsoluteHullAreaIndex = 3;
@@ -16,11 +16,14 @@ public class SimRecorderEditor : Editor
     private const int ClusterCountIndex = 5;
     private const int WallContactReachedIndex = 6;
     private const int AverageOtherMotionDurationIndex = 7;
-    private static readonly string[] NonRandomEndConditionLabels = new string[AverageOtherMotionDurationIndex];
+    private const int MotionSettledIndex = 8;
+    private static readonly string[] NonRandomEndConditionLabels = new string[EndConditionLabels.Length - 1];
+    private static readonly int[] NonRandomEndConditionValues = { 0, 1, 2, 3, 4, 5, 6, MotionSettledIndex };
 
     static SimRecorderEditor()
     {
-        System.Array.Copy(EndConditionLabels, NonRandomEndConditionLabels, NonRandomEndConditionLabels.Length);
+        System.Array.Copy(EndConditionLabels, NonRandomEndConditionLabels, AverageOtherMotionDurationIndex);
+        NonRandomEndConditionLabels[AverageOtherMotionDurationIndex] = EndConditionLabels[MotionSettledIndex];
     }
 
     /// <summary>Index of DensityRatioBaseline.NoRandomnessReference in that enum.</summary>
@@ -79,10 +82,11 @@ public class SimRecorderEditor : Editor
                     endCondition.enumValueIndex = 0;
 
                 string[] conditionLabels = isRandom ? EndConditionLabels : NonRandomEndConditionLabels;
-                endCondition.enumValueIndex = GUILayout.SelectionGrid(
-                    endCondition.enumValueIndex,
-                    conditionLabels,
-                    conditionLabels.Length);
+                int selectedCondition = isRandom ? endCondition.enumValueIndex
+                    : System.Array.IndexOf(NonRandomEndConditionValues, endCondition.enumValueIndex);
+                int selectedButton = GUILayout.SelectionGrid(
+                    Mathf.Max(0, selectedCondition), conditionLabels, conditionLabels.Length);
+                endCondition.enumValueIndex = isRandom ? selectedButton : NonRandomEndConditionValues[selectedButton];
 
                 bool usesAverageDuration = endCondition.enumValueIndex == AverageOtherMotionDurationIndex;
                 if (usesAverageDuration)
@@ -201,11 +205,46 @@ public class SimRecorderEditor : Editor
                         MessageType.Info);
                 }
 
+                bool usesMotionSettling = endCondition.enumValueIndex == MotionSettledIndex;
+                if (usesMotionSettling)
+                {
+                    EditorGUILayout.PropertyField(entry.FindPropertyRelative("motionSettleWindowSeconds"),
+                        new GUIContent("Spacing Window (s)"));
+                    EditorGUILayout.Slider(entry.FindPropertyRelative("motionSettleSpacingTolerance"), 0f, 0.1f,
+                        new GUIContent("Spacing Range / Start"));
+                    SerializedProperty requireLowSpeed = entry.FindPropertyRelative("motionSettleRequireLowSpeed");
+                    EditorGUILayout.PropertyField(requireLowSpeed, new GUIContent("Require Low Speed"));
+                    using (new EditorGUI.DisabledScope(!requireLowSpeed.boolValue))
+                    {
+                        EditorGUILayout.Slider(entry.FindPropertyRelative("motionSettleSpeedFraction"), 0f, 0.1f,
+                            new GUIContent("Speed / Max Speed"));
+                    }
+                    EditorGUILayout.PropertyField(entry.FindPropertyRelative("motionSettleHoldSeconds"),
+                        new GUIContent("Stability Hold (s)"));
+                    EditorGUILayout.PropertyField(entry.FindPropertyRelative("motionSettleMinimumRunSeconds"),
+                        new GUIContent("Minimum Run (s)"));
+                    EditorGUILayout.Slider(entry.FindPropertyRelative("motionSettleContractionFraction"), 0f, 1f,
+                        new GUIContent("Contraction To Label Success"));
+                    EditorGUILayout.HelpBox(
+                        "Ends when the range of mean 3-neighbour spacing stays within the spacing limit " +
+                        "for the stability hold. Require Low Speed additionally checks every agent's speed; " +
+                        "leave it off to detect density equilibrium despite drifting groups or random movement. " +
+                        "Waits for a full spacing window and the minimum run time. Disconnected groups " +
+                        "may settle independently. A spacing reduction at least as large as the contraction " +
+                        "threshold is labelled 'after contraction'; other settled runs are labelled " +
+                        "'without contraction'. Density equilibrium outcomes use the 'density-settled' prefix. " +
+                        "The duration cap still applies. The separate dwell " +
+                        "below is ignored for this rule.", MessageType.Info);
+                }
+
                 // Both only mean something when a rule can fire. On FixedDuration there is no event
                 // to dwell on and no moment to pad, so they are greyed out rather than misleading.
-                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration))
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration || usesMotionSettling))
                 {
                     EditorGUILayout.PropertyField(dwell, new GUIContent("Dwell Before Ending (s)"));
+                }
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration))
+                {
                     EditorGUILayout.PropertyField(endDelay, new GUIContent("End Delay (s, recorded)"));
                 }
 

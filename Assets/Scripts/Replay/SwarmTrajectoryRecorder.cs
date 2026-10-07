@@ -353,7 +353,8 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
         if (captureClusters && swarmManager != null)
         {
             SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
-                                             frame.k, swarmManager.AgentColliders);
+                                             frame.k, swarmManager.AgentColliders,
+                                             !swarmManager.useDensificationV2);
         }
 
         working.frames.Add(frame);

@@ -1,13 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>Integrates swarm steering and tracks each agent's contacts with arena walls.</summary>
+/// <summary>Integrates swarm steering, constrains movement against the central obstacle, and tracks wall contacts.</summary>
 public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
+    private Collider2D agentCollider;
+    private readonly List<RaycastHit2D> obstacleHits = new List<RaycastHit2D>(16);
+    private const float ObstacleSkin = 0.001f;
     private readonly HashSet<Collider2D> touchingWalls = new HashSet<Collider2D>();
 
     public bool HasHitWall { get; private set; }
+
+    private void Awake()
+    {
+        agentCollider = GetComponent<Collider2D>();
+    }
 
     public void ResetWallContactTracking()
     {
@@ -48,6 +56,10 @@ public class SwarmAgent : MonoBehaviour
     public void UpdateAgent(SwarmManager manager, float deltaTime)
     {
         Vector2 currentPosition = transform.position;
+        Collider2D obstacle = manager.ObstacleCollider;
+        bool usableObstacle = obstacle != null && obstacle.enabled && obstacle.gameObject.activeInHierarchy &&
+            (obstacle.attachedRigidbody == null || obstacle.attachedRigidbody.simulated);
+        if (usableObstacle) ResolveObstacleOverlap(obstacle, ref currentPosition);
 
         Vector2 cohesionSum = Vector2.zero;
         Vector2 separationSum = Vector2.zero;
@@ -72,7 +84,7 @@ public class SwarmAgent : MonoBehaviour
                 // Calculate distance to the edge of the other agent (using its collider if available)
                 float perceptionDistance = centerDistance;
                 Collider2D otherCollider = i < otherColliders.Length ? otherColliders[i] : null;
-                if (otherCollider != null)
+                if (otherCollider != null && !manager.useDensificationV2)
                 {
                     perceptionDistance = Vector2.Distance(currentPosition, otherCollider.ClosestPoint(currentPosition));
                 }
@@ -91,7 +103,9 @@ public class SwarmAgent : MonoBehaviour
                 }
 
                 // Rule 6: Overlapping Avoidance
-                if (centerDistance < manager.safetyDistance && centerDistance > 0.0001f)
+                // The paper defines overlap avoidance over perceived neighbours only.
+                if ((!manager.useDensificationV2 || perceptionDistance < manager.perceptionRadius) &&
+                    centerDistance < manager.safetyDistance && centerDistance > 0.0001f)
                 {
                     Vector2 avoidDirection = currentPosition - otherPos;
                     overlappingAvoidanceSum += avoidDirection.normalized;
@@ -124,7 +138,7 @@ public class SwarmAgent : MonoBehaviour
         acceleration += randomMovementForce;
 
         // Common Fate (Attraction to global target)
-        if (manager.commonFateTarget != null)
+        if (!manager.useDensificationV2 && manager.commonFateTarget != null)
         {
             Vector2 targetPoint = (Vector2)manager.commonFateTarget.position;
 
@@ -142,28 +156,14 @@ public class SwarmAgent : MonoBehaviour
         // Environmental Obstacle Avoidance (Repulsive potential field)
         if (manager.centralObstacle != null)
         {
-            Collider2D obstacleCollider = manager.ObstacleCollider;
-            if (obstacleCollider != null)
+            Collider2D obstacleCollider = obstacle;
+            if (usableObstacle)
             {
                 Vector2 closest = obstacleCollider.ClosestPoint(currentPosition);
                 Vector2 away = currentPosition - closest;
                 float distFromSurface = away.magnitude;
 
-                // If we're inside the collider, ClosestPoint returns the point itself.
-                if (distFromSurface <= 0.0001f)
-                {
-                    Debug.Log("Agent is inside the obstacle collider! Using center of collider as fallback.");
-                    away = currentPosition - (Vector2)obstacleCollider.bounds.center;
-                    distFromSurface = away.magnitude;
-
-                    if (distFromSurface <= 0.0001f)
-                    {
-                        away = Random.insideUnitCircle;
-                        distFromSurface = away.magnitude;
-                    }
-                }
-
-                if (distFromSurface < manager.obstacleAvoidanceRadius) // 0.1
+                if (distFromSurface > 0.0001f && distFromSurface < manager.obstacleAvoidanceRadius)
                 {
                     // Inverse square law based on distance from the collider surface.
                     Vector2 avoidDirection = away.normalized;
@@ -172,7 +172,7 @@ public class SwarmAgent : MonoBehaviour
                     acceleration += avoidForce;
                 }
             }
-            else
+            else if (obstacleCollider == null)
             {
                 // Fallback: approximate by distance to transform position.
                 float distToObstacle = Vector2.Distance(currentPosition, manager.centralObstacle.position);
@@ -198,7 +198,11 @@ public class SwarmAgent : MonoBehaviour
             currentVelocity = currentVelocity.normalized * manager.maxSpeed;
         }
 
-        transform.position += (Vector3)(currentVelocity * deltaTime);
+        Vector2 nextPosition = usableObstacle
+            ? MoveAgainstObstacle(obstacle, currentPosition, currentVelocity * deltaTime)
+            : currentPosition + currentVelocity * deltaTime;
+        Vector3 position = transform.position;
+        transform.position = new Vector3(nextPosition.x, nextPosition.y, position.z);
 
         // Face the direction of movement
         if (currentVelocity != Vector2.zero)
@@ -206,6 +210,91 @@ public class SwarmAgent : MonoBehaviour
             float angle = Mathf.Atan2(currentVelocity.y, currentVelocity.x) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
         }
+    }
+
+    private void ResolveObstacleOverlap(Collider2D obstacle, ref Vector2 position)
+    {
+        if (agentCollider == null || !agentCollider.enabled || agentCollider.attachedRigidbody == null ||
+            !agentCollider.attachedRigidbody.simulated ||
+            obstacle.attachedRigidbody == null) return;
+
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            ColliderDistance2D distance = ObstacleDistance(obstacle, position);
+            if (!distance.isValid || distance.distance >= ObstacleSkin) return;
+
+            Vector2 direction = distance.isOverlapped
+                ? distance.pointB - distance.pointA : distance.pointA - distance.pointB;
+            if (direction.sqrMagnitude < 0.00000001f) direction = distance.normal;
+            if (direction.sqrMagnitude < 0.00000001f) return;
+            direction.Normalize();
+            float correction = Mathf.Abs(distance.distance) + ObstacleSkin;
+            Vector2 candidate = position + direction * correction;
+            ColliderDistance2D candidateDistance = ObstacleDistance(obstacle, candidate);
+            if (!candidateDistance.isValid) return;
+            if (candidateDistance.distance < distance.distance)
+            {
+                direction = -direction;
+                candidate = position + direction * correction;
+            }
+            position = candidate;
+            RemoveInwardVelocity(direction);
+            RegisterWallContact(obstacle, false, false);
+        }
+    }
+
+    private ColliderDistance2D ObstacleDistance(Collider2D obstacle, Vector2 position)
+    {
+        Rigidbody2D body = agentCollider.attachedRigidbody;
+        Vector2 bodyPosition = position + (Vector2)(body.transform.position - transform.position);
+        Rigidbody2D obstacleBody = obstacle.attachedRigidbody;
+        // Explicit poses keep queries correct during Euler substeps without syncing every agent transform.
+        return agentCollider.Distance(bodyPosition, body.transform.eulerAngles.z, obstacle,
+            obstacleBody.transform.position, obstacleBody.transform.eulerAngles.z);
+    }
+
+    private Vector2 MoveAgainstObstacle(Collider2D obstacle, Vector2 position, Vector2 movement)
+    {
+        if (agentCollider == null || !agentCollider.enabled || agentCollider.attachedRigidbody == null ||
+            !agentCollider.attachedRigidbody.simulated) return position + movement;
+
+        ContactFilter2D filter = new ContactFilter2D { useTriggers = true };
+        filter.SetLayerMask(1 << obstacle.gameObject.layer);
+        // Steering forces are soft; sweep the full collider so a substep cannot cross a thin obstacle.
+        for (int attempt = 0; attempt < 3 && movement.sqrMagnitude > 0.00000001f; attempt++)
+        {
+            float length = movement.magnitude;
+            Vector2 direction = movement / length;
+            Rigidbody2D body = agentCollider.attachedRigidbody;
+            Vector2 bodyPosition = position + (Vector2)(body.transform.position - transform.position);
+            int count = agentCollider.Cast(bodyPosition, body.transform.eulerAngles.z, direction, filter, obstacleHits, length + ObstacleSkin);
+            bool blocked = false;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit2D hit = obstacleHits[i];
+                if (hit.collider != obstacle || Vector2.Dot(movement, hit.normal) >= 0f) continue;
+                float travel = Mathf.Clamp(hit.distance - ObstacleSkin, 0f, length);
+                position += direction * travel;
+                movement -= direction * travel;
+                movement -= hit.normal * Mathf.Min(0f, Vector2.Dot(movement, hit.normal));
+                RemoveInwardVelocity(hit.normal);
+                RegisterWallContact(obstacle, false, false);
+                blocked = true;
+                break;
+            }
+            if (!blocked)
+            {
+                position += movement;
+                break;
+            }
+        }
+        ResolveObstacleOverlap(obstacle, ref position);
+        return position;
+    }
+
+    private void RemoveInwardVelocity(Vector2 outwardNormal)
+    {
+        currentVelocity -= outwardNormal * Mathf.Min(0f, Vector2.Dot(currentVelocity, outwardNormal));
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -238,7 +327,7 @@ public class SwarmAgent : MonoBehaviour
         touchingWalls.Remove(collider);
     }
 
-    private void RegisterWallContact(Collider2D collider, bool logHit)
+    private void RegisterWallContact(Collider2D collider, bool logHit, bool rememberContact = true)
     {
         if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) return;
 
@@ -247,7 +336,7 @@ public class SwarmAgent : MonoBehaviour
             if (wall.gameObject.CompareTag("Wall") ||
                 wall.name.IndexOf("wall", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                touchingWalls.Add(collider);
+                if (rememberContact) touchingWalls.Add(collider);
                 HasHitWall = true;
                 if (logHit) Debug.Log($"{gameObject.name} hit the wall: {collider.gameObject.name}");
                 return;

@@ -135,7 +135,8 @@ public class ClusterPanel : MonoBehaviour
     private void PerceptionGraphLabels()
     {
         SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
-                                         perceptionSizes, swarmManager.AgentColliders);
+                                         perceptionSizes, swarmManager.AgentColliders,
+                                         !swarmManager.useDensificationV2);
 
         // ClusterSizes reports sizes, not memberships, so the graph is walked again here to colour
         // the agents. Cheap at this swarm size and keeps one definition of the edge test.
@@ -146,7 +147,7 @@ public class ClusterPanel : MonoBehaviour
         float radius = swarmManager.perceptionRadius;
         float agentRadius = 0f;
         Collider2D[] colliders = swarmManager.AgentColliders;
-        if (colliders != null && colliders.Length > 0 && colliders[0] != null)
+        if (!swarmManager.useDensificationV2 && colliders != null && colliders.Length > 0 && colliders[0] != null)
         {
             agentRadius = Mathf.Max(colliders[0].bounds.extents.x, colliders[0].bounds.extents.y);
         }
