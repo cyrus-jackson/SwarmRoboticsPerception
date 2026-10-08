@@ -133,49 +133,15 @@ public class SwarmAgent : MonoBehaviour
             acceleration += directionToFate * manager.cohesionIntensity;
         }
 
-        // Environmental Obstacle Avoidance (Repulsive potential field)
-        if (manager.centralObstacle != null)
+        Collider2D obstacleCollider = manager.ObstacleCollider;
+        if (obstacleCollider != null)
         {
-            Collider2D obstacleCollider = manager.ObstacleCollider;
-            if (obstacleCollider != null)
+            Vector2 away = currentPosition - obstacleCollider.ClosestPoint(currentPosition);
+            float distance = away.magnitude;
+            if (distance > 0.0001f && distance < manager.obstacleAvoidanceRadius)
             {
-                Vector2 closest = obstacleCollider.ClosestPoint(currentPosition);
-                Vector2 away = currentPosition - closest;
-                float distFromSurface = away.magnitude;
-
-                // If we're inside the collider, ClosestPoint returns the point itself.
-                if (distFromSurface <= 0.0001f)
-                {
-                    Debug.Log("Agent is inside the obstacle collider! Using center of collider as fallback.");
-                    away = currentPosition - (Vector2)obstacleCollider.bounds.center;
-                    distFromSurface = away.magnitude;
-
-                    if (distFromSurface <= 0.0001f)
-                    {
-                        away = Random.insideUnitCircle;
-                        distFromSurface = away.magnitude;
-                    }
-                }
-
-                if (distFromSurface < manager.obstacleAvoidanceRadius) // 0.1
-                {
-                    // Inverse square law based on distance from the collider surface.
-                    Vector2 avoidDirection = away.normalized;
-                    float denom = Mathf.Max(distFromSurface * distFromSurface, 0.01f);
-                    Vector2 avoidForce = (avoidDirection / denom) * manager.envObstacleAvoidanceIntensity;
-                    acceleration += avoidForce;
-                }
-            }
-            else
-            {
-                // Fallback: approximate by distance to transform position.
-                float distToObstacle = Vector2.Distance(currentPosition, manager.centralObstacle.position);
-                if (distToObstacle < manager.obstacleAvoidanceRadius)
-                {
-                    Vector2 avoidDirection = (currentPosition - (Vector2)manager.centralObstacle.position);
-                    Vector2 avoidForce = (avoidDirection / Mathf.Max(distToObstacle * distToObstacle, 0.01f)) * manager.envObstacleAvoidanceIntensity;
-                    acceleration += avoidForce;
-                }
+                float squaredDistance = Mathf.Max(distance * distance, 0.01f);
+                acceleration += away.normalized * (manager.envObstacleAvoidanceIntensity / squaredDistance);
             }
         }
 

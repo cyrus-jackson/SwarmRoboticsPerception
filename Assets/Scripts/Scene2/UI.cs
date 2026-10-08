@@ -121,7 +121,11 @@ public class UI : MonoBehaviour
     void Start()
     {
         if (swarmManager != null)
+        {
             swarmManager.enabled = false;
+            uiEnvAvoid = swarmManager.envObstacleAvoidanceIntensity;
+            uiObstacleRad = swarmManager.obstacleAvoidanceRadius;
+        }
 
         CollectWallsFromRoot();
         EnsureDensityMonitor();
@@ -409,7 +413,6 @@ public class UI : MonoBehaviour
                 uiSeparation = 1f;
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
@@ -418,7 +421,6 @@ public class UI : MonoBehaviour
                 uiSeparation = 1.0f;
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
@@ -430,7 +432,6 @@ public class UI : MonoBehaviour
                 uiFriction = 1.0f;
                 uiRandomMvmt = 0.0f;
                 uiOverlapAvoid = 1.0f;
-                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.35f;
                 uiPerceptionRad = 1.5f;
                 break;
@@ -438,7 +439,6 @@ public class UI : MonoBehaviour
                 uiCohesion = 0.0f;
                 uiSeparation = 0.0f;
                 uiAlignment = 0.0f;
-                uiObstacleRad = 0.1f;
                 uiRandomMvmt = 20.0f;
                 uiPerceptionRad = 3.2f;
                 break;
@@ -447,7 +447,6 @@ public class UI : MonoBehaviour
                 uiSeparation = 5.0f;
                 uiAlignment = 0.0f;
                 uiRandomMvmt = 0.0f;
-                uiObstacleRad = 0.1f;
                 uiSafetyDist = 0.5f;
                 uiPerceptionRad = 2.0f;
                 break;
