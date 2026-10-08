@@ -108,10 +108,8 @@ public class UI : MonoBehaviour
 
     private float uiOverlapAvoid = 20.0f;
     private float uiSafetyDist = 0.2f;
-    private float uiEnvAvoid = 3.0f;
 
     private float uiPerceptionRad = 0.2f;
-    private float uiObstacleRad = 0.1f;
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = false;
     private bool uiShowDensityArea = false;
@@ -123,8 +121,6 @@ public class UI : MonoBehaviour
         if (swarmManager != null)
         {
             swarmManager.enabled = false;
-            uiEnvAvoid = swarmManager.envObstacleAvoidanceIntensity;
-            uiObstacleRad = swarmManager.obstacleAvoidanceRadius;
         }
 
         CollectWallsFromRoot();
@@ -286,7 +282,7 @@ public class UI : MonoBehaviour
             Debug.LogWarning($"UI: {selectedSwarmType} spawned only {activeAgents.Count} of " +
                              $"{uiNumberOfAgents} agents from {source}. " +
                              $"The spawn area may be too small for the safety distance " +
-                             $"({uiSafetyDist:F2}), or the obstacle clearance ({uiObstacleRad:F2}) " +
+                             $"({uiSafetyDist:F2}), or the agent's physical obstacle clearance " +
                              $"may be blocking positions.");
         }
         else
@@ -529,11 +525,9 @@ public class UI : MonoBehaviour
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
         uiSafetyDist = DrawSlider("Safety Dist", uiSafetyDist, 0.1f, 5f);
-        uiEnvAvoid = DrawSlider("Env Avoid", uiEnvAvoid, 0, 500);
 
         GUILayout.Label("<b>Perception</b>");
         uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0.1f, 30f);
-        uiObstacleRad = DrawSlider("Obs View Rad", uiObstacleRad, 0, 10);
         uiMaxSpeed = DrawSlider("Max Speed", uiMaxSpeed, 1, 20);
 
         GUILayout.Space(10); GUILayout.Label("<b>Density End Rule</b>");
@@ -849,9 +843,7 @@ public class UI : MonoBehaviour
             case SwarmParameterToRecord.RandomMovement: uiRandomMvmt = value; break;
             case SwarmParameterToRecord.OverlapAvoidance: uiOverlapAvoid = value; break;
             case SwarmParameterToRecord.SafetyDistance: uiSafetyDist = value; break;
-            case SwarmParameterToRecord.EnvAvoidance: uiEnvAvoid = value; break;
             case SwarmParameterToRecord.PerceptionRad: uiPerceptionRad = value; break;
-            case SwarmParameterToRecord.ObstacleRadius: uiObstacleRad = value; break;
             case SwarmParameterToRecord.MaxSpeed: uiMaxSpeed = value; break;
         }
     }
@@ -874,10 +866,10 @@ public class UI : MonoBehaviour
 
         swarmManager.overlappingAvoidanceIntensity = uiOverlapAvoid;
         swarmManager.safetyDistance = uiSafetyDist;
-        swarmManager.envObstacleAvoidanceIntensity = uiEnvAvoid;
+        swarmManager.envObstacleAvoidanceIntensity = 0f;
 
         swarmManager.perceptionRadius = uiPerceptionRad;
-        swarmManager.obstacleAvoidanceRadius = uiObstacleRad;
+        swarmManager.obstacleAvoidanceRadius = 0f;
         swarmManager.maxSpeed = uiMaxSpeed;
 
         swarmManager.showPerceptionRadius = uiShowPerceptionRadius;
@@ -1109,7 +1101,7 @@ public class UI : MonoBehaviour
         Vector3 center = activeSpawnArea.position;
 
         Transform activeObstacle = GetDefaultObstacle();
-        float obstacleSpawnPadding = Mathf.Max(uiObstacleRad, AgentObstacleClearance());
+        float obstacleSpawnPadding = AgentObstacleClearance();
 
         if (selectedSpawnType == AgentSpawnType.Spiral)
         {
@@ -1326,7 +1318,7 @@ public class UI : MonoBehaviour
         Gizmos.color = Color.blue;
 
         Transform defaultObstacle = GetDefaultObstacle();
-        if (defaultObstacle != null) DrawObstacleGizmos(defaultObstacle, uiObstacleRad);
+        if (defaultObstacle != null) DrawObstacleGizmos(defaultObstacle, 0f);
     }
 
     private float AgentObstacleClearance()

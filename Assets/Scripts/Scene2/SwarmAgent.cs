@@ -1,9 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>Integrates swarm steering and tracks each agent's contacts with arena walls.</summary>
+/// <summary>Applies swarm steering through 2D physics, rebounds at obstacle contact, and tracks wall hits.</summary>
+[RequireComponent(typeof(Rigidbody2D))]
 public class SwarmAgent : MonoBehaviour
 {
+    private Rigidbody2D body;
+    private SwarmManager currentManager;
     private Vector2 currentVelocity;
     private readonly HashSet<Collider2D> touchingWalls = new HashSet<Collider2D>();
 
@@ -26,7 +29,22 @@ public class SwarmAgent : MonoBehaviour
     private Vector2 randomMovementDirection;
 
     /// <summary>Current velocity, exposed so trajectory capture can record it.</summary>
-    public Vector2 Velocity => currentVelocity;
+    public Vector2 Velocity => body != null && body.simulated ? body.linearVelocity : currentVelocity;
+
+    private void Awake()
+    {
+        body = GetComponent<Rigidbody2D>();
+        body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+    }
+
+    /// <summary>Pauses or resumes physics alongside the manager while retaining the agent's velocity.</summary>
+    public void SetSimulationActive(bool active)
+    {
+        if (body == null) body = GetComponent<Rigidbody2D>();
+        if (body.simulated) currentVelocity = body.linearVelocity;
+        body.simulated = active;
+        if (active) body.linearVelocity = currentVelocity;
+    }
 
     /// <summary>
     /// Draws the random movement vector in [-0.5, 0.5] for this frame's movement update.
@@ -37,13 +55,13 @@ public class SwarmAgent : MonoBehaviour
     }
 
     /// <summary>
-    /// One explicit Euler step of the paper's model:
-    ///   v(t) = v(t-1) + a(t) * dt
-    ///   p(t) = p(t-1) + v(t) * dt
+    /// Integrates steering acceleration into velocity; the physics step moves the body and resolves contacts.
     /// </summary>
     public void UpdateAgent(SwarmManager manager, float deltaTime)
     {
-        Vector2 currentPosition = transform.position;
+        currentManager = manager;
+        currentVelocity = body.linearVelocity;
+        Vector2 currentPosition = body.position;
 
         Vector2 cohesionSum = Vector2.zero;
         Vector2 separationSum = Vector2.zero;
@@ -79,7 +97,7 @@ public class SwarmAgent : MonoBehaviour
                     SwarmAgent otherAgent = i < otherAgents.Length ? otherAgents[i] : null;
                     if (otherAgent != null)
                     {
-                        alignmentSum += otherAgent.currentVelocity;
+                        alignmentSum += otherAgent.Velocity;
                     }
                     neighborCount++;
 
@@ -130,19 +148,7 @@ public class SwarmAgent : MonoBehaviour
             }
 
             Vector2 directionToFate = (targetPoint - currentPosition).normalized;
-            acceleration += directionToFate * manager.cohesionIntensity;
-        }
-
-        Collider2D obstacleCollider = manager.ObstacleCollider;
-        if (obstacleCollider != null)
-        {
-            Vector2 away = currentPosition - obstacleCollider.ClosestPoint(currentPosition);
-            float distance = away.magnitude;
-            if (distance > 0.0001f && distance < manager.obstacleAvoidanceRadius)
-            {
-                float squaredDistance = Mathf.Max(distance * distance, 0.01f);
-                acceleration += away.normalized * (manager.envObstacleAvoidanceIntensity / squaredDistance);
-            }
+            acceleration += directionToFate * manager.cohesionIntensity * 2;
         }
 
         // Rule 5: Friction
@@ -158,24 +164,42 @@ public class SwarmAgent : MonoBehaviour
             currentVelocity = currentVelocity.normalized * manager.maxSpeed;
         }
 
-        transform.position += (Vector3)(currentVelocity * deltaTime);
+        body.linearVelocity = currentVelocity;
 
         // Face the direction of movement
         if (currentVelocity != Vector2.zero)
         {
             float angle = Mathf.Atan2(currentVelocity.y, currentVelocity.x) * Mathf.Rad2Deg;
-            transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
+            body.rotation = angle;
         }
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
+        ReboundFromObstacle(collision);
         RegisterWallContact(collision.collider, true);
     }
 
     private void OnCollisionStay2D(Collision2D collision)
     {
+        ReboundFromObstacle(collision);
         RegisterWallContact(collision.collider, false);
+    }
+
+    private void ReboundFromObstacle(Collision2D collision)
+    {
+        if (currentManager == null || currentManager.centralObstacle == null ||
+            !collision.collider.transform.IsChildOf(currentManager.centralObstacle)) return;
+
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            Vector2 normal = collision.GetContact(i).normal;
+            if (Vector2.Dot(currentVelocity, normal) >= 0f) continue;
+
+
+            currentVelocity = Vector2.Reflect(currentVelocity, normal);
+            body.linearVelocity = currentVelocity;
+        }
     }
 
     private void OnCollisionExit2D(Collision2D collision)

@@ -32,12 +32,12 @@ public class SwarmManager : MonoBehaviour
     public float overlappingAvoidanceIntensity = 20.0f; // oI
     public float safetyDistance = 1f; // sd
 
-    [Header("Environmental Obstacle Avoidance")]
-    public float envObstacleAvoidanceIntensity = 3.0f;
+    // Retained for existing recording schemas; blind agents exert no obstacle avoidance force.
+    [HideInInspector] public float envObstacleAvoidanceIntensity;
+    [HideInInspector] public float obstacleAvoidanceRadius;
 
     [Header("Perception")]
     public float perceptionRadius = 1f;
-    public float obstacleAvoidanceRadius = 2.5f;
     public float maxSpeed = 5.0f;
 
     [Header("Visualization")]
@@ -90,6 +90,27 @@ public class SwarmManager : MonoBehaviour
             if (agents[i] == null) continue;
             agentColliders[i] = agents[i].GetComponent<Collider2D>();
             agentScripts[i] = agents[i].GetComponent<SwarmAgent>();
+            if (agentScripts[i] != null) agentScripts[i].SetSimulationActive(isActiveAndEnabled);
+        }
+    }
+
+    private void OnEnable()
+    {
+        envObstacleAvoidanceIntensity = 0f;
+        obstacleAvoidanceRadius = 0f;
+        SetAgentSimulationActive(true);
+    }
+
+    private void OnDisable()
+    {
+        SetAgentSimulationActive(false);
+    }
+
+    private void SetAgentSimulationActive(bool active)
+    {
+        foreach (SwarmAgent agent in agentScripts)
+        {
+            if (agent != null) agent.SetSimulationActive(active);
         }
     }
 
