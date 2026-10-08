@@ -1471,8 +1471,6 @@ MonoBehaviour:
   maxSpeed: 1.5
   showPerceptionRadius: 1
   showDensityArea: 0
-  simulationStep: 0.008333334
-  maxSubstepsPerFrame: 16
 --- !u!4 &912726474
 Transform:
   m_ObjectHideFlags: 0

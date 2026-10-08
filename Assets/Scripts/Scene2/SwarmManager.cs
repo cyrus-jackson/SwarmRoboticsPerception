@@ -18,7 +18,7 @@ public class SwarmManager : MonoBehaviour
     public SwarmDensityMonitor densityMonitor;
 
     [Header("Behavior Version")]
-    [Tooltip("Selected by UI.cs. Densification V2 uses center-distance neighbours and local avoidance, without common fate attraction.")]
+    [Tooltip("Selected by UI.cs. Identifies Densification V2 for preset and recording selection; all modes use the shared SwarmAgent rules.")]
     public bool useDensificationV2 = false;
 
     [Header("Swarm Parameters")]
@@ -45,17 +45,6 @@ public class SwarmManager : MonoBehaviour
     [Tooltip("Draw the measured density region as a runtime outline, visible in the Game view.")]
     public bool showDensityArea = false;
 
-    [Header("Integration")]
-    [Tooltip("Fixed simulation step in seconds. Each frame's elapsed time is consumed in steps of this size using the paper's Euler update, so behaviour no longer depends on frame rate and fast agents cannot step over an obstacle in one go.")]
-    public float simulationStep = 1f / 120f;
-    [Tooltip("Maximum substeps per frame. Kept low on purpose: a slow frame produces a large deltaTime, which would ask for more substeps and make the next frame slower still. Leftover time is dropped instead.")]
-    public int maxSubstepsPerFrame = 3;
-
-    private float stepAccumulator = 0f;
-
-    // Component lookups for the neighbour loop, resolved once per scene reset rather than per
-    // agent pair per substep. With 40 agents at 1/120 s that loop was making roughly 375,000
-    // GetComponent calls a second, which is what made long batches unrecoverable.
     private Collider2D[] agentColliders = new Collider2D[0];
     private SwarmAgent[] agentScripts = new SwarmAgent[0];
 
@@ -64,7 +53,7 @@ public class SwarmManager : MonoBehaviour
 
     /// <summary>
     /// Collider of the active central obstacle, resolved on demand and re-resolved when the
-    /// obstacle changes. Previously looked up once per agent per substep.
+    /// obstacle changes.
     /// </summary>
     public Collider2D ObstacleCollider
     {
@@ -112,11 +101,22 @@ public class SwarmManager : MonoBehaviour
         }
     }
 
-    void Update()
+    void FixedUpdate()
     {
         if (agents == null) return;
 
-        StepSimulation();
+        if (agentScripts.Length != agents.Length) RebuildAgentCache();
+
+        for (int i = 0; i < agentScripts.Length; i++)
+        {
+            if (agentScripts[i] != null) agentScripts[i].SampleRandomMovement();
+        }
+
+        float deltaTime = Time.deltaTime;
+        for (int i = 0; i < agentScripts.Length; i++)
+        {
+            if (agentScripts[i] != null) agentScripts[i].UpdateAgent(this, deltaTime);
+        }
 
         foreach (GameObject agentObj in agents)
         {
@@ -150,51 +150,6 @@ public class SwarmManager : MonoBehaviour
         {
             densityMonitor.Evaluate(agents);
         }
-    }
-
-    /// <summary>
-    /// Advances the swarm by this frame's elapsed time, in fixed steps of simulationStep. The rule
-    /// set and the Euler update are unchanged from Hénard et al. (2024); only the step size is
-    /// subdivided, which keeps a fast agent from crossing an obstacle between two samples. The
-    /// random movement vector is drawn once per frame so its magnitude per unit time is unaffected
-    /// by the number of substeps.
-    /// </summary>
-    private void StepSimulation()
-    {
-        float step = Mathf.Max(0.0001f, simulationStep);
-        int stepCap = Mathf.Max(1, maxSubstepsPerFrame);
-
-        // Safety net: if the agents array was replaced without a RebuildAgentCache call, the
-        // cached lookups would be stale or short.
-        if (agentColliders.Length != agents.Length) RebuildAgentCache();
-
-        for (int i = 0; i < agentScripts.Length; i++)
-        {
-            if (agentScripts[i] != null) agentScripts[i].SampleRandomMovement();
-        }
-
-        stepAccumulator += Time.deltaTime;
-
-        int stepsTaken = 0;
-        while (stepAccumulator >= step && stepsTaken < stepCap)
-        {
-            for (int i = 0; i < agentScripts.Length; i++)
-            {
-                if (agentScripts[i] != null) agentScripts[i].UpdateAgent(this, step);
-            }
-
-            stepAccumulator -= step;
-            stepsTaken++;
-        }
-
-        // Drop any backlog rather than trying to catch up, which would produce a speed spike.
-        if (stepsTaken >= stepCap) stepAccumulator = 0f;
-    }
-
-    /// <summary>Clears the leftover time so a new run starts on a clean step boundary.</summary>
-    public void ResetIntegration()
-    {
-        stepAccumulator = 0f;
     }
 
     /// <summary>Percentage of agents currently inside the active goal area (0 when no area is set).</summary>

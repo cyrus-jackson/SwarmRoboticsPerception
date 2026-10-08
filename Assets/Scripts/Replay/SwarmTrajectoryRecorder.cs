@@ -354,7 +354,7 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
         {
             SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
                                              frame.k, swarmManager.AgentColliders,
-                                             !swarmManager.useDensificationV2);
+                                             true);
         }
 
         working.frames.Add(frame);
@@ -402,7 +402,7 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
             obstacleRadius = swarmManager.obstacleAvoidanceRadius,
             perceptionRadius = swarmManager.perceptionRadius,
             maxSpeed = swarmManager.maxSpeed,
-            simulationStep = swarmManager.simulationStep,
+            simulationStep = 0f,
 
             obstacleName = swarmManager.centralObstacle != null ? swarmManager.centralObstacle.name : null,
             goalAreaName = goalArea != null ? goalArea.name : null,

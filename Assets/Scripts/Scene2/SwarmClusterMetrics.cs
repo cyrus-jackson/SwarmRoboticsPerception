@@ -13,7 +13,6 @@ using UnityEngine;
 /// the distance from one agent's centre to the *edge* of the other's collider, compared against
 /// the perception radius. Measuring clusters with a different rule than the agents use to steer
 /// would report a fragmentation the swarm itself does not experience, or miss one it does.
-/// Densification V2 disables collider edges to use the paper's centre-distance neighbours.
 ///
 /// A lone agent counts as a group of one. The paper treats losing a single robot as fragmentation
 /// ("the swarm loses one or more robots or splits into several groups"), and reporting sizes rather
@@ -48,7 +47,7 @@ public static class SwarmClusterMetrics
         for (int i = 0; i < n; i++) { parent[i] = i; rank[i] = 0; size[i] = 1; }
 
         // O(n^2) pair test. n is 40 here, so 780 pairs per sample — cheaper than the neighbour
-        // loop the simulation already runs every substep, and this runs once per captured frame.
+        // loop the simulation already runs every frame, and this runs once per captured frame.
         for (int i = 0; i < n; i++)
         {
             for (int j = i + 1; j < n; j++)

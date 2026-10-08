@@ -262,6 +262,7 @@ public class SimRecorder : MonoBehaviour
         public float totalClipDuration;              // recordedDuration + overlay
     }
 
+    /// <summary>Stores recording batch settings and the configurations of its simulations.</summary>
     [System.Serializable]
     private class BatchConfig
     {
@@ -272,7 +273,7 @@ public class SimRecorder : MonoBehaviour
         public string endConditionsPerMotionType;
         public float videoFinishedOverlayDuration;
         public int frameRate;
-        public float simulationStep;
+        public float simulationStep;   // 0 denotes frame-based integration; retained for recording compatibility.
         public string saveFolder;
         public SimulationConfig[] simulations;
     }
@@ -767,7 +768,7 @@ public class SimRecorder : MonoBehaviour
 
         SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
                                          clusterSizeBuffer, swarmManager.AgentColliders,
-                                         !swarmManager.useDensificationV2);
+                                         true);
 
         return minClusterSize <= 1
             ? clusterSizeBuffer.Count
@@ -1997,7 +1998,7 @@ public class SimRecorder : MonoBehaviour
             recordingTimePerSim = recordingTimePerSim,
             endConditionsPerMotionType = DescribeEndConditions(),
             frameRate = recordingFrameRate,
-            simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+            simulationStep = 0f,
             videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
             saveFolder = saveFolder,
             simulations = simulations.ToArray()
@@ -2506,7 +2507,7 @@ public class SimRecorder : MonoBehaviour
             recordingTimePerSim = recordingTimePerSim,
             endConditionsPerMotionType = DescribeEndConditions(),
             frameRate = recordingFrameRate,
-            simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+            simulationStep = 0f,
             videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
             saveFolder = saveFolder,
             simulations = simulations.ToArray()
@@ -2665,7 +2666,7 @@ public class SimRecorder : MonoBehaviour
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
                 frameRate = recordingFrameRate,
-                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+                simulationStep = 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -2822,7 +2823,7 @@ public class SimRecorder : MonoBehaviour
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
                 frameRate = recordingFrameRate,
-                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+                simulationStep = 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -2985,7 +2986,7 @@ public class SimRecorder : MonoBehaviour
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
                 frameRate = recordingFrameRate,
-                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+                simulationStep = 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -3162,7 +3163,7 @@ public class SimRecorder : MonoBehaviour
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
                 frameRate = recordingFrameRate,
-                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+                simulationStep = 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()
@@ -3330,7 +3331,7 @@ public class SimRecorder : MonoBehaviour
                 recordingTimePerSim = recordingTimePerSim,
                 endConditionsPerMotionType = DescribeEndConditions(),
                 frameRate = recordingFrameRate,
-                simulationStep = swarmManager != null ? swarmManager.simulationStep : 0f,
+                simulationStep = 0f,
                 videoFinishedOverlayDuration = showVideoFinishedOverlay ? videoFinishedOverlayDuration : 0f,
                 saveFolder = saveFolder,
                 simulations = simulations.ToArray()

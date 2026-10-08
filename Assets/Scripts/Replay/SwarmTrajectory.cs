@@ -327,7 +327,7 @@ public class TrajectoryHeader
     public float obstacleRadius;
     public float perceptionRadius;
     public float maxSpeed;
-    public float simulationStep;
+    public float simulationStep;     // 0 denotes frame-based integration; positive values describe legacy fixed steps.
 
     // Scene context.
     public string obstacleName;

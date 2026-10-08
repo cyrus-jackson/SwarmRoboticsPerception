@@ -1143,7 +1143,8 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         RowPair("Random mvmt", $"{h.randomMovement:F2}", "Overlap avoid", $"{h.overlapAvoidance:F2}");
         RowPair("Safety dist", $"{h.safetyDistance:F2}", "Env avoid", $"{h.envAvoidance:F2}");
         RowPair("Perception", $"{h.perceptionRadius:F2}", "Obstacle rad", $"{h.obstacleRadius:F2}");
-        RowPair("Max speed", $"{h.maxSpeed:F2}", "Sim step", $"{h.simulationStep:F4}");
+        RowPair("Max speed", $"{h.maxSpeed:F2}", "Sim step",
+            h.simulationStep > 0f ? $"{h.simulationStep:F4}" : "Per frame");
 
         GUILayout.Space(4);
         if (!string.IsNullOrEmpty(h.obstacleName)) Row("Obstacle", h.obstacleName);

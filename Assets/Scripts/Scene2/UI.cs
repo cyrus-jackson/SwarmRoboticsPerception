@@ -294,7 +294,6 @@ public class UI : MonoBehaviour
         {
             swarmManager.agents = activeAgents.ToArray();
             swarmManager.RebuildAgentCache();
-            swarmManager.ResetIntegration();
             UpdateSwarmManager();
 
             if (ActiveGoalArea != null) ActiveGoalArea.ResetTracking();
@@ -807,7 +806,7 @@ public class UI : MonoBehaviour
 
         SwarmClusterMetrics.ClusterSizes(swarmManager.agents, swarmManager.perceptionRadius,
                                          clusterSizeBuffer, swarmManager.AgentColliders,
-                                         !swarmManager.useDensificationV2);
+                                         true);
 
         if (clusterSizeBuffer.Count == 0) return "Groups: no agents";
 
