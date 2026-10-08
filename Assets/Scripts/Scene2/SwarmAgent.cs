@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>Integrates swarm steering using perceived neighbours and the configured movement forces.</summary>
 public class SwarmAgent : MonoBehaviour
 {
     private Vector2 currentVelocity;
@@ -70,13 +71,13 @@ public class SwarmAgent : MonoBehaviour
                         alignmentSum += otherAgent.currentVelocity;
                     }
                     neighborCount++;
-                }
 
-                // Rule 6: Overlapping Avoidance
-                if (centerDistance < manager.safetyDistance && centerDistance > 0.0001f)
-                {
-                    Vector2 avoidDirection = currentPosition - otherPos;
-                    overlappingAvoidanceSum += avoidDirection.normalized;
+                    // Rule 6 uses only perceived neighbours, as defined by A being a subset of N.
+                    if (centerDistance < manager.safetyDistance && centerDistance > 0.0001f)
+                    {
+                        Vector2 avoidDirection = currentPosition - otherPos;
+                        overlappingAvoidanceSum += avoidDirection.normalized;
+                    }
                 }
             }
         }
