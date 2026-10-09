@@ -8,22 +8,24 @@ public class SimRecorderEditor : Editor
 {
     private static readonly string[] EndConditionLabels =
         { "Fixed Duration", "Target Area Reached", "Density Ratio", "Absolute Hull Area", "Spread Settled",
-          "Cluster Count", "Wall Contact Reached", "Average Other Motions", "Motion Settled" };
+          "Cluster Count", "Wall Contact Reached", "Sample Other Video Length", "Motion Settled", "DBSCAN Count Stable" };
     private const int TargetAreaReachedIndex = 1;
     private const int DensityRatioReachedIndex = 2;
     private const int AbsoluteHullAreaIndex = 3;
     private const int SpreadSettledIndex = 4;
     private const int ClusterCountIndex = 5;
     private const int WallContactReachedIndex = 6;
-    private const int AverageOtherMotionDurationIndex = 7;
+    private const int SampledOtherMotionDurationIndex = 7;
     private const int MotionSettledIndex = 8;
+    private const int ClusterCountStableIndex = 9;
     private static readonly string[] NonRandomEndConditionLabels = new string[EndConditionLabels.Length - 1];
-    private static readonly int[] NonRandomEndConditionValues = { 0, 1, 2, 3, 4, 5, 6, MotionSettledIndex };
+    private static readonly int[] NonRandomEndConditionValues = { 0, 1, 2, 3, 4, 5, 6, MotionSettledIndex, ClusterCountStableIndex };
 
     static SimRecorderEditor()
     {
-        System.Array.Copy(EndConditionLabels, NonRandomEndConditionLabels, AverageOtherMotionDurationIndex);
-        NonRandomEndConditionLabels[AverageOtherMotionDurationIndex] = EndConditionLabels[MotionSettledIndex];
+        System.Array.Copy(EndConditionLabels, NonRandomEndConditionLabels, SampledOtherMotionDurationIndex);
+        NonRandomEndConditionLabels[SampledOtherMotionDurationIndex] = EndConditionLabels[MotionSettledIndex];
+        NonRandomEndConditionLabels[MotionSettledIndex] = EndConditionLabels[ClusterCountStableIndex];
     }
 
     /// <summary>Index of DensityRatioBaseline.NoRandomnessReference in that enum.</summary>
@@ -75,28 +77,71 @@ public class SimRecorderEditor : Editor
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
                 EditorGUILayout.PropertyField(swarmType, new GUIContent("Motion Type"));
-                EditorGUILayout.PropertyField(startDelay, new GUIContent("Start Delay (s, not recorded)"));
+                bool isDensificationV2 = swarmType.enumValueIndex == (int)SwarmType.DensificationV2;
+                if (isDensificationV2)
+                {
+                    startDelay.floatValue = 0f;
+                    endCondition.enumValueIndex = ClusterCountStableIndex;
+                    dwell.floatValue = 0f;
+                }
+                using (new EditorGUI.DisabledScope(isDensificationV2))
+                    EditorGUILayout.PropertyField(startDelay, new GUIContent("Start Delay (s, not recorded)"));
 
                 bool isRandom = swarmType.enumValueIndex == (int)SwarmType.Random;
-                if (!isRandom && endCondition.enumValueIndex == AverageOtherMotionDurationIndex)
+                if (!isRandom && endCondition.enumValueIndex == SampledOtherMotionDurationIndex)
                     endCondition.enumValueIndex = 0;
 
                 string[] conditionLabels = isRandom ? EndConditionLabels : NonRandomEndConditionLabels;
                 int selectedCondition = isRandom ? endCondition.enumValueIndex
                     : System.Array.IndexOf(NonRandomEndConditionValues, endCondition.enumValueIndex);
-                int selectedButton = GUILayout.SelectionGrid(
-                    Mathf.Max(0, selectedCondition), conditionLabels, conditionLabels.Length);
-                endCondition.enumValueIndex = isRandom ? selectedButton : NonRandomEndConditionValues[selectedButton];
+                using (new EditorGUI.DisabledScope(isDensificationV2))
+                {
+                    int selectedButton = GUILayout.SelectionGrid(
+                        Mathf.Max(0, selectedCondition), conditionLabels, conditionLabels.Length);
+                    endCondition.enumValueIndex = isRandom ? selectedButton : NonRandomEndConditionValues[selectedButton];
+                }
 
-                bool usesAverageDuration = endCondition.enumValueIndex == AverageOtherMotionDurationIndex;
-                if (usesAverageDuration)
+                bool usesClusterStability = endCondition.enumValueIndex == ClusterCountStableIndex;
+                if (usesClusterStability)
+                {
+                    EditorGUILayout.LabelField("DBSCAN Termination Settings", EditorStyles.boldLabel);
+                    SerializedProperty useAutoEps = entry.FindPropertyRelative("dbscanUseAutoEps");
+                    EditorGUILayout.PropertyField(useAutoEps, new GUIContent("Use Automatic Eps"));
+                    if (useAutoEps.boolValue)
+                    {
+                        EditorGUILayout.PropertyField(entry.FindPropertyRelative("dbscanAutoEpsK"),
+                            new GUIContent("Auto Eps Neighbour Rank (k)"));
+                        EditorGUILayout.PropertyField(entry.FindPropertyRelative("dbscanSpacingMultiple"),
+                            new GUIContent("Auto Eps Spacing Multiple"));
+                    }
+                    else
+                    {
+                        EditorGUILayout.PropertyField(entry.FindPropertyRelative("dbscanEps"),
+                            new GUIContent("Fixed Eps (world units)"));
+                    }
+                    EditorGUILayout.PropertyField(entry.FindPropertyRelative("dbscanMinPoints"),
+                        new GUIContent("Min Points (includes self)"));
+                    EditorGUILayout.HelpBox(
+                        "Samples DBSCAN from capture t = 0 and ends once its count has stayed unchanged " +
+                        "throughout the preceding 3 seconds, after at least 5 seconds of recorded motion. " +
+                        "Every count change restarts the window; there is no extra dwell or speed/spacing check. " +
+                        "Uses the DBSCAN settings above for both recordings and Play Motion diagnostics. " +
+                        "Settings are captured when the run starts. V2 defaults to fixed epsilon 1.5 and " +
+                        "Min Points 3. The cluster panel has its own display settings. Noise is excluded from the count. " +
+                        "The duration cap remains, with a minimum of 5 seconds.", MessageType.Info);
+                }
+
+                bool usesSampledDuration = endCondition.enumValueIndex == SampledOtherMotionDurationIndex;
+                if (usesSampledDuration)
                 {
                     EditorGUILayout.HelpBox(
-                        "Random records for the mean motion duration of all other clips in this batch. " +
+                        "Before every Random clip, independently sample one completed non-Random video " +
+                        "from this batch and use its recorded motion duration as the stopping time. " +
                         "Combinations and Swarm Type + Parameter batches run Random last automatically. " +
-                        "Each completed non-Random clip counts equally, including recorded tails. " +
+                        "Each eligible video has an equal chance of selection and can be selected again. " +
+                        "The sampled duration includes its recorded tail. " +
                         "Warm-up, ending markers, finished cards and automatic reference clips are excluded. " +
-                        "The average replaces the duration cap; dwell and an additional tail are not applied. " +
+                        "The sampled duration replaces the duration cap; dwell and an additional tail are not applied. " +
                         "Include at least one other motion type in the batch.",
                         MessageType.Info);
                 }
@@ -239,16 +284,16 @@ public class SimRecorderEditor : Editor
 
                 // Both only mean something when a rule can fire. On FixedDuration there is no event
                 // to dwell on and no moment to pad, so they are greyed out rather than misleading.
-                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration || usesMotionSettling))
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesSampledDuration || usesMotionSettling || usesClusterStability))
                 {
                     EditorGUILayout.PropertyField(dwell, new GUIContent("Dwell Before Ending (s)"));
                 }
-                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesAverageDuration))
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesSampledDuration))
                 {
                     EditorGUILayout.PropertyField(endDelay, new GUIContent("End Delay (s, recorded)"));
                 }
 
-                using (new EditorGUI.DisabledScope(usesAverageDuration))
+                using (new EditorGUI.DisabledScope(usesSampledDuration))
                 {
                     EditorGUILayout.PropertyField(overrideTime, new GUIContent("Max Time Override (0 = global)"));
                 }

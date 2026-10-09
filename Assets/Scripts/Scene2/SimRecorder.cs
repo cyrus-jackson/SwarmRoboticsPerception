@@ -61,10 +61,12 @@ public enum RecordingEndCondition
     ClusterCountReached,
     /// <summary>Stop once wallContactAgentPercent of unique spawned agents have touched any wall during capture.</summary>
     WallContactReached,
-    /// <summary>Random only: record for the mean motion duration of the other completed clips in this batch.</summary>
-    AverageOtherMotionDuration,
+    /// <summary>Random only: sample another completed clip in this batch and record for its motion duration.</summary>
+    SampledOtherMotionDuration,
     /// <summary>Stop when local spacing is stable for a sustained period, with an optional low-speed requirement.</summary>
-    MotionSettled
+    MotionSettled,
+    /// <summary>Stop after five seconds when the DBSCAN cluster count has stayed unchanged for the last three seconds.</summary>
+    ClusterCountStable
 }
 
 /// <summary>What <c>densityTargetRatio</c> is a ratio of.</summary>
@@ -144,6 +146,25 @@ public class SimRecorder : MonoBehaviour
 
         [Tooltip("ClusterCountReached: smallest group that counts. 1 treats a lone agent as its own group, which is how fragmentation is defined in the paper. 2 ignores strays and counts only real groups.")]
         public int minClusterSize = 1;
+
+        [Tooltip("ClusterCountStable: derive DBSCAN epsilon from agent spacing instead of using the fixed epsilon below.")]
+        public bool dbscanUseAutoEps = false;
+
+        [Tooltip("ClusterCountStable: fixed DBSCAN neighbourhood radius in world units.")]
+        [Min(0f)]
+        public float dbscanEps = 1.5f;
+
+        [Tooltip("ClusterCountStable: points required for a DBSCAN core point, including itself.")]
+        [Min(1)]
+        public int dbscanMinPoints = 3;
+
+        [Tooltip("ClusterCountStable with automatic epsilon: nearest-neighbour rank used to measure spacing.")]
+        [Min(1)]
+        public int dbscanAutoEpsK = 3;
+
+        [Tooltip("ClusterCountStable with automatic epsilon: multiply the median kth-neighbour distance by this value.")]
+        [Min(0f)]
+        public float dbscanSpacingMultiple = 4f;
 
         [Tooltip("SpreadSettled: slope limit as a fraction of the largest value seen so far, per second. 0.02 means the spread must be changing by under 2% of its peak per second.")]
         public float settleTolerance = 0.02f;
@@ -231,11 +252,24 @@ public class SimRecorder : MonoBehaviour
         public int clusterCountAtStart;              // groups when recording began
         public int clusterCountAtEnd;                // groups when the clip finished
         public int minClusterSize;                   // smallest group counted
+        public string clusterStabilityMethod;
+        public int dbscanClusterCountAtStart;
+        public int dbscanClusterCountAtEnd;
+        public int dbscanNoiseCountAtEnd;
+        public int dbscanMinPoints;
+        public float dbscanEpsAtStart;
+        public float dbscanEpsAtEnd;
+        public int dbscanAutoEpsK;
+        public float dbscanSpacingMultiple;
+        public float clusterStabilityWindowSeconds;
+        public float clusterStabilityMinimumRunSeconds;
+        public float clusterCountUnchangedSeconds;
         public float endConditionDwellTime;          // seconds the rule had to hold before firing
         public float recordedDuration;               // motion plus the ending marker
         public float recordedMotionDuration;         // includes the recorded tail, excludes closing frames
-        public float averageOtherMotionDuration;
-        public int averageOtherMotionSampleCount;
+        public float sampledOtherMotionDuration;
+        public int sampledOtherMotionSampleCount;
+        public string sampledOtherMotionFileName;
         public float maxRecordingTime;               // duration cap that applied to this sim
         public string goalAreaName;
         public float goalAreaAgentPercentThreshold;  // 0 when the condition was FixedDuration
@@ -297,9 +331,9 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Start delay and end condition for each motion type. Missing types record immediately for the full duration.")]
     public List<MotionTypeRecordingSettings> motionTypeRecordingSettings = new List<MotionTypeRecordingSettings>
     {
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 90f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Flocking, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.TargetAreaReached, goalAreaAgentPercent = 10f, wallsToDisable = new List<string> { "Wall3", "Wall4" } },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Densification, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.RecordingStart, densityTargetRatio = 0.3f, recordingEndDelay = 3f },
-        new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.AverageOtherMotionDuration },
+        new MotionTypeRecordingSettings { swarmType = SwarmType.Random, recordingStartDelay = 1.5f, endCondition = RecordingEndCondition.SampledOtherMotionDuration },
         new MotionTypeRecordingSettings { swarmType = SwarmType.Dispersion, recordingStartDelay = 0f, endCondition = RecordingEndCondition.DensityRatioReached, densityRatioBaseline = DensityRatioBaseline.NoRandomnessReference, densityTargetRatio = 1f, recordingEndDelay = 3f },
         CreateDensificationV2RecordingSettings()
     };
@@ -333,7 +367,7 @@ public class SimRecorder : MonoBehaviour
     public int param2Iterations = 4;
 
     [Header("SwarmType + Parameter Batch")]
-    public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.DensificationV2 };
+    public List<SwarmType> swarmTypesToRecord = new List<SwarmType> { SwarmType.Dispersion };
     public SwarmParameterToRecord swarmTypeBatchParameter = SwarmParameterToRecord.Cohesion;
     public float swarmTypeParamStart = 1.0f;
     public float swarmTypeParamStep = 0.5f;
@@ -350,7 +384,7 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Record the no-randomness reference runs (mp4 + trajectory json) into a NoRandomnessReferences child folder of the batch, with their own batch_config.json. Off measures them unrecorded.")]
     public bool saveNoRandomnessReferences = true;
 
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.DensificationV2 };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Dispersion, SwarmType.DensificationV2, SwarmType.Random };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     [Tooltip("RandomMovement sweep values are added to a base of 60 for Random motion only. For all other motion types and parameters, values are used directly. This applies to any of the three parameter axes.")]
     public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
@@ -411,8 +445,9 @@ public class SimRecorder : MonoBehaviour
     // Outcome of the most recent recording window.
     private float lastRecordedDuration;
     private float lastRecordedMotionDuration;
-    private float lastAverageOtherMotionDuration;
-    private int lastAverageOtherMotionSampleCount;
+    private float lastSampledOtherMotionDuration;
+    private int lastSampledOtherMotionSampleCount;
+    private string lastSampledOtherMotionFileName;
     private string lastEndReason = "timeout";
     private string lastGoalAreaName;
     private int lastAgentsInsideGoalArea;
@@ -454,6 +489,11 @@ public class SimRecorder : MonoBehaviour
 
     private readonly SpreadSettleDetector settleDetector = new SpreadSettleDetector();
     private readonly MotionSettleDetector motionSettleDetector = new MotionSettleDetector();
+    private readonly ClusterCountStabilityDetector clusterStabilityDetector = new ClusterCountStabilityDetector();
+    private readonly SwarmSpatialClustering.DbscanCounter clusterStabilityCounter = new SwarmSpatialClustering.DbscanCounter();
+    private bool lastClusterStabilityEnabled;
+    private float lastDbscanEpsAtStart;
+    private int lastDbscanClusterCountAtStart;
     private readonly List<Vector2> motionSettlePositions = new List<Vector2>();
     private MotionTypeRecordingSettings lastMotionSettleSettings;
     private string lastWallsDisabled = "";
@@ -477,21 +517,27 @@ public class SimRecorder : MonoBehaviour
     private bool videoFinishedOverlayActive = false;
     private Texture2D blackOverlayTexture;
 
-    private static MotionTypeRecordingSettings CreateDensificationV2RecordingSettings()
+    /// <summary>Provides the shared V2 defaults for recording and live termination diagnostics.</summary>
+    public static MotionTypeRecordingSettings CreateDensificationV2RecordingSettings()
     {
         return new MotionTypeRecordingSettings
         {
             swarmType = SwarmType.DensificationV2,
             recordingStartDelay = 0f,
-            endCondition = RecordingEndCondition.FixedDuration,
+            endCondition = RecordingEndCondition.ClusterCountStable,
             densityMetric = SwarmDensityMetric.MeanKnnDistance,
             endConditionDwellTime = 0f,
-            recordingEndDelay = 0f
+            recordingEndDelay = 0f,
+            dbscanUseAutoEps = false,
+            dbscanEps = 1.5f,
+            dbscanMinPoints = 3,
+            dbscanAutoEpsK = 3,
+            dbscanSpacingMultiple = 4f
         };
     }
 
     /// <summary>
-    /// Returns configured recording rules, with a no-delay / FixedDuration fallback for missing types.
+    /// Returns recording rules, enforcing the DBSCAN stability condition and capture from t = 0 for V2.
     /// </summary>
     public MotionTypeRecordingSettings GetSettingsFor(SwarmType type)
     {
@@ -499,7 +545,14 @@ public class SimRecorder : MonoBehaviour
         {
             foreach (MotionTypeRecordingSettings entry in motionTypeRecordingSettings)
             {
-                if (entry != null && entry.swarmType == type) return entry;
+                if (entry == null || entry.swarmType != type) continue;
+                if (type == SwarmType.DensificationV2)
+                {
+                    entry.endCondition = RecordingEndCondition.ClusterCountStable;
+                    entry.recordingStartDelay = 0f;
+                    entry.endConditionDwellTime = 0f;
+                }
+                return entry;
             }
         }
 
@@ -775,6 +828,17 @@ public class SimRecorder : MonoBehaviour
             : SwarmClusterMetrics.CountAtLeast(clusterSizeBuffer, minClusterSize);
     }
 
+    private void CaptureClusterStabilitySettings(MotionTypeRecordingSettings settings)
+    {
+        clusterStabilityCounter.CaptureSettings(settings.dbscanUseAutoEps, settings.dbscanEps,
+            settings.dbscanMinPoints, settings.dbscanAutoEpsK, settings.dbscanSpacingMultiple);
+    }
+
+    private int MeasureDbscanClusterCount()
+    {
+        return clusterStabilityCounter.Measure(swarmManager.agents);
+    }
+
     /// <summary>Points the monitor at this motion type's metric and takes the reference measurement.</summary>
     private void CaptureDensityBaseline(MotionTypeRecordingSettings settings)
     {
@@ -839,6 +903,7 @@ public class SimRecorder : MonoBehaviour
         foreach (MotionTypeRecordingSettings entry in motionTypeRecordingSettings)
         {
             if (entry == null) continue;
+            GetSettingsFor(entry.swarmType);
 
             string rule;
             switch (entry.endCondition)
@@ -849,8 +914,8 @@ public class SimRecorder : MonoBehaviour
                 case RecordingEndCondition.WallContactReached:
                     rule = $"WallContactReached@{entry.wallContactAgentPercent:F0}% unique agents";
                     break;
-                case RecordingEndCondition.AverageOtherMotionDuration:
-                    rule = "AverageOtherMotionDuration[Random only]";
+                case RecordingEndCondition.SampledOtherMotionDuration:
+                    rule = "SampledOtherMotionDuration[Random only]";
                     break;
                 case RecordingEndCondition.DensityRatioReached:
                     rule = $"DensityRatioReached[{entry.densityMetric}]@{entry.densityTargetRatio:F2}";
@@ -862,6 +927,13 @@ public class SimRecorder : MonoBehaviour
                 case RecordingEndCondition.ClusterCountReached:
                     rule = $"ClusterCountReached@{entry.clusterCountTarget} groups of "
                          + $"{entry.minClusterSize}+";
+                    break;
+
+                case RecordingEndCondition.ClusterCountStable:
+                    string dbscanRadius = entry.dbscanUseAutoEps
+                        ? $"auto eps, k={entry.dbscanAutoEpsK}, spacing multiple={entry.dbscanSpacingMultiple:F2}"
+                        : $"fixed eps={entry.dbscanEps:F2}";
+                    rule = $"ClusterCountStable[DBSCAN {dbscanRadius}, Min Points={entry.dbscanMinPoints}, unchanged for 3s, min 5s]";
                     break;
 
                 case RecordingEndCondition.MotionSettled:
@@ -877,17 +949,18 @@ public class SimRecorder : MonoBehaviour
                     break;
             }
 
-            bool usesAverageDuration = entry.endCondition == RecordingEndCondition.AverageOtherMotionDuration;
-            string tail = !usesAverageDuration && entry.recordingEndDelay > 0f
+            bool usesSampledDuration = entry.endCondition == RecordingEndCondition.SampledOtherMotionDuration;
+            string tail = !usesSampledDuration && entry.recordingEndDelay > 0f
                 ? $",tail {entry.recordingEndDelay:F1}s" : "";
             string description = $"{entry.swarmType}:delay {entry.recordingStartDelay:F1}s,{rule}{tail}";
 
-            if (!usesAverageDuration && entry.overrideRecordingTime > 0f)
+            if (!usesSampledDuration && entry.overrideRecordingTime > 0f)
             {
                 description += $" (max {entry.overrideRecordingTime:F1}s)";
             }
 
-            if (!usesAverageDuration && entry.endCondition != RecordingEndCondition.MotionSettled && entry.endConditionDwellTime > 0f)
+            if (!usesSampledDuration && entry.endCondition != RecordingEndCondition.MotionSettled &&
+                entry.endCondition != RecordingEndCondition.ClusterCountStable && entry.endConditionDwellTime > 0f)
             {
                 description += $" (dwell {entry.endConditionDwellTime:F2}s)";
             }
@@ -908,10 +981,10 @@ public class SimRecorder : MonoBehaviour
 
     private bool ValidateSingleMotionRecording()
     {
-        if (GetSettingsFor(CurrentSwarmType).endCondition != RecordingEndCondition.AverageOtherMotionDuration)
+        if (GetSettingsFor(CurrentSwarmType).endCondition != RecordingEndCondition.SampledOtherMotionDuration)
             return true;
 
-        Debug.LogError("[SimRecorder] AverageOtherMotionDuration requires Random in a Combinations or " +
+        Debug.LogError("[SimRecorder] SampledOtherMotionDuration requires Random in a Combinations or " +
                        "Swarm Type + Parameter batch with at least one other motion type.");
         return false;
     }
@@ -924,20 +997,20 @@ public class SimRecorder : MonoBehaviour
         foreach (SwarmType type in order)
         {
             if (type != SwarmType.Random &&
-                GetSettingsFor(type).endCondition == RecordingEndCondition.AverageOtherMotionDuration)
+                GetSettingsFor(type).endCondition == RecordingEndCondition.SampledOtherMotionDuration)
             {
-                Debug.LogError($"[SimRecorder] AverageOtherMotionDuration is only available for Random, not {type}.");
+                Debug.LogError($"[SimRecorder] SampledOtherMotionDuration is only available for Random, not {type}.");
                 return false;
             }
         }
 
         if (!order.Contains(SwarmType.Random) ||
-            GetSettingsFor(SwarmType.Random).endCondition != RecordingEndCondition.AverageOtherMotionDuration)
+            GetSettingsFor(SwarmType.Random).endCondition != RecordingEndCondition.SampledOtherMotionDuration)
             return true;
 
         if (!order.Exists(type => type != SwarmType.Random))
         {
-            Debug.LogError("[SimRecorder] Random needs another motion type in this batch to calculate its average duration.");
+            Debug.LogError("[SimRecorder] Random needs another motion type in this batch to sample a recorded video duration.");
             return false;
         }
 
@@ -948,25 +1021,26 @@ public class SimRecorder : MonoBehaviour
         return true;
     }
 
-    private static bool TryGetOtherMotionAverage(List<SimulationConfig> simulations, out float duration, out int sampleCount)
+    private static bool TrySampleOtherMotion(List<SimulationConfig> simulations, out SimulationConfig sampledClip,
+        out int sampleCount)
     {
-        double total = 0d;
-        sampleCount = 0;
+        List<SimulationConfig> candidates = new List<SimulationConfig>();
         if (simulations != null)
         {
             foreach (SimulationConfig clip in simulations)
             {
                 if (clip == null || string.IsNullOrEmpty(clip.endReason) ||
+                    string.IsNullOrEmpty(clip.fileName) ||
                     string.IsNullOrEmpty(clip.swarmType) || clip.swarmType == SwarmType.Random.ToString() ||
-                    clip.recordedMotionDuration < 0f || float.IsNaN(clip.recordedMotionDuration) ||
+                    clip.recordedMotionDuration <= 0f || float.IsNaN(clip.recordedMotionDuration) ||
                     float.IsInfinity(clip.recordedMotionDuration)) continue;
 
-                total += clip.recordedMotionDuration;
-                sampleCount++;
+                candidates.Add(clip);
             }
         }
 
-        duration = sampleCount > 0 ? (float)(total / sampleCount) : 0f;
+        sampleCount = candidates.Count;
+        sampledClip = sampleCount > 0 ? candidates[Random.Range(0, sampleCount)] : null;
         return sampleCount > 0;
     }
 
@@ -988,18 +1062,29 @@ public class SimRecorder : MonoBehaviour
         SwarmDensityMonitor densityMonitor = ResolveDensityMonitor();
 
         float maxTime = settings.overrideRecordingTime > 0f ? settings.overrideRecordingTime : recordingTimePerSim;
-        lastAverageOtherMotionDuration = 0f;
-        lastAverageOtherMotionSampleCount = 0;
-        bool averageDurationEnabled = swarmType == SwarmType.Random &&
-                                      settings.endCondition == RecordingEndCondition.AverageOtherMotionDuration &&
-                                      TryGetOtherMotionAverage(batchSimulations, out lastAverageOtherMotionDuration,
-                                          out lastAverageOtherMotionSampleCount);
-        if (averageDurationEnabled)
+        bool wantsClusterStability = settings.endCondition == RecordingEndCondition.ClusterCountStable;
+        if (wantsClusterStability)
+            maxTime = Mathf.Max(ClusterCountStabilityDetector.MinimumRunSeconds, maxTime);
+        lastSampledOtherMotionDuration = 0f;
+        lastSampledOtherMotionSampleCount = 0;
+        lastSampledOtherMotionFileName = null;
+        bool wantsSampledDuration = swarmType == SwarmType.Random &&
+                                    settings.endCondition == RecordingEndCondition.SampledOtherMotionDuration;
+        SimulationConfig sampledClip = null;
+        bool sampledDurationEnabled = wantsSampledDuration &&
+                                      TrySampleOtherMotion(batchSimulations, out sampledClip,
+                                          out lastSampledOtherMotionSampleCount);
+        if (sampledDurationEnabled)
         {
-            maxTime = lastAverageOtherMotionDuration;
-            Debug.Log($"[SimRecorder] Random: recording for the average motion duration {maxTime:F2}s " +
-                      $"of {lastAverageOtherMotionSampleCount} other clips in this batch.");
+            lastSampledOtherMotionDuration = sampledClip.recordedMotionDuration;
+            lastSampledOtherMotionFileName = sampledClip.fileName;
+            maxTime = lastSampledOtherMotionDuration;
+            Debug.Log($"[SimRecorder] Random: sampled '{lastSampledOtherMotionFileName}' from " +
+                      $"{lastSampledOtherMotionSampleCount} other clips in this batch; recording for {maxTime:F2}s.");
         }
+        else if (wantsSampledDuration)
+            Debug.LogWarning($"[SimRecorder] Random: no completed non-Random clips with a valid motion duration " +
+                             $"are available to sample; recording to the {maxTime:F2}s duration cap.");
         bool wantsGoalCondition = settings.endCondition == RecordingEndCondition.TargetAreaReached;
         bool goalConditionEnabled = wantsGoalCondition && goalArea != null && settings.goalAreaAgentPercent > 0f;
         bool wantsWallContactCondition = settings.endCondition == RecordingEndCondition.WallContactReached;
@@ -1171,8 +1256,26 @@ public class SimRecorder : MonoBehaviour
                              $"and a swarm manager; falling back to the {maxTime:F2}s duration.");
         }
 
-        // MotionSettled owns its combined dwell; other rules retain their existing dwell.
-        float dwellRequired = averageDurationEnabled || wantsMotionSettle
+        lastClusterStabilityEnabled = wantsClusterStability && swarmManager != null;
+        clusterStabilityDetector.Reset(0);
+        clusterStabilityCounter.Result.Clear();
+        lastDbscanEpsAtStart = 0f;
+        lastDbscanClusterCountAtStart = 0;
+        if (lastClusterStabilityEnabled)
+        {
+            CaptureClusterStabilitySettings(settings);
+            int initialCount = MeasureDbscanClusterCount();
+            lastClusterStabilityEnabled = clusterStabilityCounter.AgentCount > 0;
+            lastDbscanClusterCountAtStart = initialCount;
+            lastDbscanEpsAtStart = clusterStabilityCounter.Radius;
+            clusterStabilityDetector.Reset(initialCount);
+            clusterBaseline = CountClusters(settings.minClusterSize);
+        }
+        if (wantsClusterStability && !lastClusterStabilityEnabled)
+            Debug.LogWarning($"[SimRecorder] {swarmType}: DBSCAN stability needs spawned agents and a swarm manager; recording to the {maxTime:F2}s duration.");
+
+        // Stability rules already include their observation window; no additional dwell applies.
+        float dwellRequired = sampledDurationEnabled || wantsMotionSettle || wantsClusterStability
             ? 0f : Mathf.Max(0f, settings.endConditionDwellTime);
         float heldFor = 0f;
 
@@ -1250,7 +1353,22 @@ public class SimRecorder : MonoBehaviour
                     MaximumAgentSpeed(), motionSpeedLimit);
             }
 
-            if (motionSettled)
+            bool clusterCountStable = false;
+            if (lastClusterStabilityEnabled)
+            {
+                int count = MeasureDbscanClusterCount();
+                clusterCountStable = clusterStabilityDetector.Push(timer,
+                    clusterStabilityCounter.AgentCount > 0 ? count : -1);
+            }
+
+            if (clusterCountStable)
+            {
+                conditionMet = true;
+                reason = "cluster-count-stable";
+                detail = $"DBSCAN count {clusterStabilityDetector.ClusterCount} unchanged for " +
+                         $"{clusterStabilityDetector.StableFor:F2}s (3s window, minimum 5s of motion)";
+            }
+            else if (motionSettled)
             {
                 conditionMet = true;
                 string settledPrefix = motionSettleDetector.requireLowSpeed ? "settled" : "density-settled";
@@ -1366,10 +1484,11 @@ public class SimRecorder : MonoBehaviour
             }
         }
 
+        if (lastClusterStabilityEnabled) MeasureDbscanClusterCount();
         lastRecordedMotionDuration = timer;
-        if (averageDurationEnabled)
+        if (sampledDurationEnabled)
         {
-            lastEndReason = "average-other-motion-duration";
+            lastEndReason = "sampled-other-motion-duration";
         }
 
         // Mark the closing frames while the recorder is still running, so the clip itself shows
@@ -1506,8 +1625,9 @@ public class SimRecorder : MonoBehaviour
         config.endReason = lastEndReason;
         config.recordedDuration = lastRecordedDuration;
         config.recordedMotionDuration = lastRecordedMotionDuration;
-        config.averageOtherMotionDuration = lastAverageOtherMotionDuration;
-        config.averageOtherMotionSampleCount = lastAverageOtherMotionSampleCount;
+        config.sampledOtherMotionDuration = lastSampledOtherMotionDuration;
+        config.sampledOtherMotionSampleCount = lastSampledOtherMotionSampleCount;
+        config.sampledOtherMotionFileName = lastSampledOtherMotionFileName;
         config.goalAreaName = lastGoalAreaName;
         config.endConditionUsed = lastEndConditionUsed.ToString();
         config.recordingStartDelay = lastStartDelay;
@@ -1525,6 +1645,19 @@ public class SimRecorder : MonoBehaviour
         config.clusterCountAtStart = lastClusterCountAtStart;
         config.clusterCountAtEnd = lastClusterCountAtEnd;
         config.minClusterSize = lastMinClusterSize;
+        config.clusterStabilityMethod = lastClusterStabilityEnabled
+            ? (clusterStabilityCounter.AutoRadius ? "DBSCAN auto eps" : "DBSCAN fixed eps") : null;
+        config.dbscanClusterCountAtStart = lastClusterStabilityEnabled ? lastDbscanClusterCountAtStart : 0;
+        config.dbscanClusterCountAtEnd = lastClusterStabilityEnabled ? clusterStabilityCounter.Result.ClusterCount : 0;
+        config.dbscanNoiseCountAtEnd = lastClusterStabilityEnabled ? clusterStabilityCounter.Result.NoiseCount : 0;
+        config.dbscanMinPoints = lastClusterStabilityEnabled ? clusterStabilityCounter.MinPoints : 0;
+        config.dbscanEpsAtStart = lastClusterStabilityEnabled ? lastDbscanEpsAtStart : 0f;
+        config.dbscanEpsAtEnd = lastClusterStabilityEnabled ? clusterStabilityCounter.Radius : 0f;
+        config.dbscanAutoEpsK = lastClusterStabilityEnabled && clusterStabilityCounter.AutoRadius ? clusterStabilityCounter.AutoEpsK : 0;
+        config.dbscanSpacingMultiple = lastClusterStabilityEnabled && clusterStabilityCounter.AutoRadius ? clusterStabilityCounter.SpacingMultiple : 0f;
+        config.clusterStabilityWindowSeconds = lastClusterStabilityEnabled ? ClusterCountStabilityDetector.WindowSeconds : 0f;
+        config.clusterStabilityMinimumRunSeconds = lastClusterStabilityEnabled ? ClusterCountStabilityDetector.MinimumRunSeconds : 0f;
+        config.clusterCountUnchangedSeconds = lastClusterStabilityEnabled ? clusterStabilityDetector.StableFor : 0f;
         config.endConditionDwellTime = lastDwellTime;
         config.wallContactAgentPercentThreshold = lastWallContactAgentPercentThreshold;
         config.wallContactTrackedAgents = lastWallContactTrackedAgents;
@@ -1635,8 +1768,10 @@ public class SimRecorder : MonoBehaviour
             // Groups the swarm is currently in, by the same perception-graph rule the cluster end
             // condition uses, so the clip shows what that rule is acting on.
             MotionTypeRecordingSettings overlaySettings = GetSettingsFor(CurrentSwarmType);
+            bool usesDbscanCount = lastClusterStabilityEnabled &&
+                                  overlaySettings.endCondition == RecordingEndCondition.ClusterCountStable;
             string groups = swarmManager != null
-                ? $"{CountClusters(overlaySettings.minClusterSize)}"
+                ? (usesDbscanCount ? clusterStabilityCounter.Result.ClusterCount : CountClusters(overlaySettings.minClusterSize)).ToString()
                 : "-";
 
             string displayText = $"{overlayStatus} | Perception: {perception:F2} " +
@@ -1663,6 +1798,10 @@ public class SimRecorder : MonoBehaviour
                                    : "| Density equilibrium ") +
                                $"| Held: {motionSettleDetector.HeldFor:F1}/{motionSettleDetector.holdSeconds:F1}s";
             }
+
+            if (overlaySettings.endCondition == RecordingEndCondition.ClusterCountStable && lastClusterStabilityEnabled)
+                displayText += $"\nDBSCAN | Clusters: {clusterStabilityCounter.Result.ClusterCount} " +
+                               $"| Count unchanged: {clusterStabilityDetector.StableFor:F1}/3.0s | Minimum motion: 5.0s";
 
             float overlayWidth = Mathf.Max(1f, Screen.width - 42f);
             float overlayHeight = recordingOverlayStyle.CalcHeight(new GUIContent(displayText), overlayWidth);

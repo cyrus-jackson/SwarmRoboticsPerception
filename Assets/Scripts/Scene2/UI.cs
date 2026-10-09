@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System.Collections;
 using System.Collections.Generic;
 
 public enum SwarmType
@@ -22,6 +23,8 @@ public enum AgentSpawnType
 /// <summary>Controls swarm presets, spawning, visualization, and recording from the runtime panel.</summary>
 public class UI : MonoBehaviour
 {
+    private Coroutine densificationTerminationDebug;
+
     [Header("Swarm Setup")]
     public GameObject agentPrefab;
     public SwarmManager swarmManager;
@@ -102,12 +105,12 @@ public class UI : MonoBehaviour
     private float uiCohesion = 5.0f;
     private float uiSeparation = 1.0f;
     private float uiAlignment = 2.0f;
-    private float uiFriction = 0.9f;
+    private float uiFriction = 0.5f;
     private float uiRandomMvmt = 0.0f;
     private float uiNeighbourSpread = 1.0f;
 
-    private float uiOverlapAvoid = 20.0f;
-    private float uiSafetyDist = 0.2f;
+    private float uiOverlapAvoid = 10.0f;
+    private float uiSafetyDist = 0.36f;
 
     private float uiPerceptionRad = 0.2f;
     private float uiMaxSpeed = 1.5f;
@@ -402,6 +405,9 @@ public class UI : MonoBehaviour
 
     void ApplyPreset(SwarmType type)
     {
+        uiFriction = 0.5f;
+        uiOverlapAvoid = 10.0f;
+        uiSafetyDist = 0.36f;
         switch (type)
         {
             case SwarmType.Flocking:
@@ -409,7 +415,6 @@ public class UI : MonoBehaviour
                 uiSeparation = 1f;
                 uiAlignment = 4.0f;
                 uiRandomMvmt = 0.0f;
-                uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
             case SwarmType.Densification:
@@ -417,18 +422,13 @@ public class UI : MonoBehaviour
                 uiSeparation = 1.0f;
                 uiAlignment = 2.0f;
                 uiRandomMvmt = 0.0f;
-                uiSafetyDist = 0.5f;
                 uiPerceptionRad = 1.7f;
                 break;
             case SwarmType.DensificationV2:
-                // Balance a pair at 0.7 units, outside the 0.35-unit avoidance threshold.
-                uiCohesion = 2.0f;
+                uiCohesion = 6.0f;
                 uiSeparation = 0.35f;
                 uiAlignment = 0.0f;
-                uiFriction = 1.0f;
                 uiRandomMvmt = 0.0f;
-                uiOverlapAvoid = 1.0f;
-                uiSafetyDist = 0.35f;
                 uiPerceptionRad = 1.5f;
                 break;
             case SwarmType.Random:
@@ -443,7 +443,6 @@ public class UI : MonoBehaviour
                 uiSeparation = 5.0f;
                 uiAlignment = 0.0f;
                 uiRandomMvmt = 0.0f;
-                uiSafetyDist = 0.5f;
                 uiPerceptionRad = 2.0f;
                 break;
         }
@@ -524,7 +523,7 @@ public class UI : MonoBehaviour
 
         GUILayout.Label("<b>Avoidance</b>");
         uiOverlapAvoid = DrawSlider("Overlap Avoid", uiOverlapAvoid, 0, 50);
-        uiSafetyDist = DrawSlider("Safety Dist", uiSafetyDist, 0.1f, 5f);
+        uiSafetyDist = DrawSlider("Safety Dist", uiSafetyDist, 0.1f, 5f, numberFormat: "F2");
 
         GUILayout.Label("<b>Perception</b>");
         uiPerceptionRad = DrawSlider("View Radius", uiPerceptionRad, 0.1f, 30f);
@@ -662,10 +661,11 @@ public class UI : MonoBehaviour
         }
     }
 
-    float DrawSlider(string label, float val, float min, float max, bool isInt = false)
+    float DrawSlider(string label, float val, float min, float max, bool isInt = false, string numberFormat = null)
     {
         GUILayout.BeginHorizontal();
-        string numberFormat = selectedSwarmType == SwarmType.DensificationV2 ? "F2" : "F1";
+        if (numberFormat == null)
+            numberFormat = selectedSwarmType == SwarmType.DensificationV2 ? "F2" : "F1";
         GUILayout.Label($"{label}: {(isInt ? (int)val : val.ToString(numberFormat))}", GUILayout.Width(100));
         float result = GUILayout.HorizontalSlider(val, min, max);
         GUILayout.EndHorizontal();
@@ -679,6 +679,7 @@ public class UI : MonoBehaviour
 
     public void SetMotion(bool play)
     {
+        StopDensificationTerminationDebug();
         isRunning = play;
         if (swarmManager != null)
         {
@@ -691,7 +692,73 @@ public class UI : MonoBehaviour
             {
                 densityMonitor.CaptureBaseline(swarmManager.agents);
             }
+
+            SimRecorder recorder = GetComponent<SimRecorder>();
+            if (isRunning && selectedSwarmType == SwarmType.DensificationV2 &&
+                !IsReplayActive && (recorder == null || !recorder.IsRecording))
+                densificationTerminationDebug = StartCoroutine(LogDensificationTermination());
         }
+    }
+
+    private IEnumerator LogDensificationTermination()
+    {
+        var counter = new SwarmSpatialClustering.DbscanCounter();
+        SimRecorder recorder = GetComponent<SimRecorder>();
+        SimRecorder.MotionTypeRecordingSettings settings = recorder != null
+            ? recorder.GetSettingsFor(SwarmType.DensificationV2)
+            : SimRecorder.CreateDensificationV2RecordingSettings();
+        counter.CaptureSettings(settings.dbscanUseAutoEps, settings.dbscanEps,
+            settings.dbscanMinPoints, settings.dbscanAutoEpsK, settings.dbscanSpacingMultiple);
+        int count = counter.Measure(swarmManager.agents);
+        if (counter.AgentCount == 0)
+        {
+            Debug.LogWarning("[DensificationV2] Termination check needs spawned agents.", this);
+            densificationTerminationDebug = null;
+            yield break;
+        }
+
+        var detector = new ClusterCountStabilityDetector();
+        detector.Reset(count);
+        float elapsed = 0f;
+        Debug.Log($"[DensificationV2] Termination check started at t=0.00s: DBSCAN clusters={count}, " +
+                  $"noise={counter.Result.NoiseCount}, radius={counter.Radius:F3} " +
+                  $"({(counter.AutoRadius ? "auto" : "fixed")}), Min Points={counter.MinPoints}. " +
+                  "Requires an unchanged count for 3s and at least 5s of motion.", this);
+
+        while (true)
+        {
+            yield return new WaitForEndOfFrame();
+            if (!isRunning || selectedSwarmType != SwarmType.DensificationV2 ||
+                swarmManager == null || !swarmManager.isActiveAndEnabled || IsReplayActive) break;
+            elapsed += Time.deltaTime;
+            int previousCount = detector.ClusterCount;
+            count = counter.Measure(swarmManager.agents);
+            bool conditionMet = detector.Push(elapsed, counter.AgentCount > 0 ? count : -1);
+            if (count != previousCount)
+                Debug.Log($"[DensificationV2] t={elapsed:F2}s: DBSCAN cluster count " +
+                          $"{previousCount} -> {count}; restarting the 3s stability window.", this);
+
+            if (!conditionMet) continue;
+            Debug.Log($"[DensificationV2] Termination condition met at t={elapsed:F2}s: " +
+                      $"DBSCAN clusters={count}, noise={counter.Result.NoiseCount}, " +
+                      $"count unchanged for {detector.StableFor:F2}s (window=3s, minimum run=5s). " +
+                      "Play Motion continues for inspection.", this);
+            break;
+        }
+
+        densificationTerminationDebug = null;
+    }
+
+    private void StopDensificationTerminationDebug()
+    {
+        if (densificationTerminationDebug == null) return;
+        StopCoroutine(densificationTerminationDebug);
+        densificationTerminationDebug = null;
+    }
+
+    private void OnDisable()
+    {
+        StopDensificationTerminationDebug();
     }
 
     /// <summary>
@@ -1019,6 +1086,7 @@ public class UI : MonoBehaviour
 
     public void ResetScene()
     {
+        StopDensificationTerminationDebug();
         isRunning = false;
         if (swarmManager != null)
             swarmManager.enabled = false;

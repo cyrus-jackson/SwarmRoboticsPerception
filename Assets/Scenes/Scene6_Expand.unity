@@ -1461,16 +1461,16 @@ MonoBehaviour:
   cohesionIntensity: 2
   separationIntensity: 1
   alignmentIntensity: 4
-  frictionIntensity: 0.1
+  frictionIntensity: 0.5
   randomMovementIntensity: 0
-  overlappingAvoidanceIntensity: 20
-  safetyDistance: 1
+  overlappingAvoidanceIntensity: 10
+  safetyDistance: 0.36
   envObstacleAvoidanceIntensity: 40
-  perceptionRadius: 1
   obstacleAvoidanceRadius: 0.85
+  perceptionRadius: 1
   maxSpeed: 1.5
   showPerceptionRadius: 1
-  showDensityArea: 0
+  showDensityArea: 1
 --- !u!4 &912726474
 Transform:
   m_ObjectHideFlags: 0
@@ -2782,8 +2782,8 @@ MonoBehaviour:
   toggleKey: 34
   visible: 0
   panelWidth: 330
-  method: 1
-  eps: 2
+  method: 0
+  eps: 1.5
   minPoints: 3
   spacingMultiple: 4
   autoEpsK: 3
@@ -3113,7 +3113,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
+  m_Offset: {x: -0.014896631, y: 0}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
@@ -3123,7 +3123,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 1, y: 1}
+  m_Size: {x: 0.97020674, y: 1}
   m_EdgeRadius: 0
 --- !u!1 &1837056938
 GameObject:

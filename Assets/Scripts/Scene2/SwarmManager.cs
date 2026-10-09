@@ -25,12 +25,12 @@ public class SwarmManager : MonoBehaviour
     public float cohesionIntensity = 5.0f;    // cI
     public float separationIntensity = 1.0f;  // sI
     public float alignmentIntensity = 2.0f;   // aI
-    public float frictionIntensity = 0.9f;    // fI
+    public float frictionIntensity = 0.5f;    // fI
     public float randomMovementIntensity = 1.0f; // rI
 
     [Header("Overlapping Avoidance (Agent to Agent)")]
-    public float overlappingAvoidanceIntensity = 20.0f; // oI
-    public float safetyDistance = 1f; // sd
+    public float overlappingAvoidanceIntensity = 10.0f; // oI
+    public float safetyDistance = 0.36f; // sd
 
     // Retained for existing recording schemas; blind agents exert no obstacle avoidance force.
     [HideInInspector] public float envObstacleAvoidanceIntensity;

@@ -26,6 +26,39 @@ using UnityEngine;
 /// </summary>
 public static class SwarmSpatialClustering
 {
+    /// <summary>Measures DBSCAN with a snapshot of the termination settings, shared by recording and live diagnostics.</summary>
+    public class DbscanCounter
+    {
+        public bool AutoRadius { get; private set; }
+        public float FixedRadius { get; private set; }
+        public int MinPoints { get; private set; }
+        public int AutoEpsK { get; private set; }
+        public float SpacingMultiple { get; private set; }
+        public float Radius { get; private set; }
+        public int AgentCount => positions.Count;
+        public Result Result { get; } = new Result();
+
+        private readonly List<Vector2> positions = new List<Vector2>();
+
+        public void CaptureSettings(bool autoRadius, float fixedRadius, int minPoints,
+            int autoEpsK, float spacingMultiple)
+        {
+            AutoRadius = autoRadius;
+            FixedRadius = Mathf.Max(0f, fixedRadius);
+            MinPoints = Mathf.Max(1, minPoints);
+            AutoEpsK = Mathf.Max(1, autoEpsK);
+            SpacingMultiple = Mathf.Max(0f, spacingMultiple);
+        }
+
+        public int Measure(GameObject[] agents)
+        {
+            CollectPositions(agents, positions);
+            Radius = AutoRadius ? AutoEps(positions, AutoEpsK, SpacingMultiple) : FixedRadius;
+            DBSCAN(positions, Radius, MinPoints, Result);
+            return Result.ClusterCount;
+        }
+    }
+
     /// <summary>Label used for points that belong to no cluster.</summary>
     public const int Noise = -1;
 
