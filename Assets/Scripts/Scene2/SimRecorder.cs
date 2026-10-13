@@ -384,7 +384,7 @@ public class SimRecorder : MonoBehaviour
     [Tooltip("Record the no-randomness reference runs (mp4 + trajectory json) into a NoRandomnessReferences child folder of the batch, with their own batch_config.json. Off measures them unrecorded.")]
     public bool saveNoRandomnessReferences = true;
 
-    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.Dispersion, SwarmType.DensificationV2, SwarmType.Random };
+    public List<SwarmType> combinationSwarmTypes = new List<SwarmType> { SwarmType.Flocking, SwarmType.DensificationV2, SwarmType.Dispersion, SwarmType.Random };
     public SwarmParameterToRecord combinationParameter1 = SwarmParameterToRecord.RandomMovement;
     [Tooltip("RandomMovement sweep values are added to a base of 60 for Random motion only. For all other motion types and parameters, values are used directly. This applies to any of the three parameter axes.")]
     public float[] combinationParam1Values = new float[] { 0.0f, 40.0f };
@@ -403,7 +403,7 @@ public class SimRecorder : MonoBehaviour
     public bool saveSpawnLayouts = true;
 
     [Tooltip("Optional. Names of saved layouts to load instead of generating fresh ones, e.g. layout_00. Leave empty to generate.")]
-    public List<string> reuseSpawnLayouts = new List<string> { "20261007_114900_layout_00" };
+    public List<string> reuseSpawnLayouts = new List<string> { };
 
     [Header("Single Parameter Batch")]
     public SwarmParameterToRecord singleBatchParameter = SwarmParameterToRecord.Cohesion;
@@ -1060,6 +1060,9 @@ public class SimRecorder : MonoBehaviour
         MotionTypeRecordingSettings settings = GetSettingsFor(swarmType);
         GoalArea goalArea = ResolveGoalArea();
         SwarmDensityMonitor densityMonitor = ResolveDensityMonitor();
+        bool stopOnFirstMeasurement = swarmType == SwarmType.Dispersion &&
+            (settings.endCondition == RecordingEndCondition.DensityRatioReached ||
+             settings.endCondition == RecordingEndCondition.SpreadSettled);
 
         float maxTime = settings.overrideRecordingTime > 0f ? settings.overrideRecordingTime : recordingTimePerSim;
         bool wantsClusterStability = settings.endCondition == RecordingEndCondition.ClusterCountStable;
@@ -1160,7 +1163,7 @@ public class SimRecorder : MonoBehaviour
         {
             settleDetector.Reset();
             settleDetector.tolerance = Mathf.Max(0.0001f, settings.settleTolerance);
-            settleDetector.holdSeconds = Mathf.Max(0f, settings.settleHoldTime);
+            settleDetector.holdSeconds = stopOnFirstMeasurement ? 0f : Mathf.Max(0f, settings.settleHoldTime);
 
             if (referenceMustSettle)
             {
@@ -1168,7 +1171,7 @@ public class SimRecorder : MonoBehaviour
                 densityConditionEnabled = false;
                 Debug.Log($"[SimRecorder] {swarmType}: this is the no-randomness reference, so it runs " +
                           $"until its spread settles (slope under {settings.settleTolerance:P0} of peak " +
-                          $"per second for {settings.settleHoldTime:F1}s) rather than to a ratio.");
+                          $"per second for {settleDetector.holdSeconds:F1}s) rather than to a ratio.");
             }
         }
 
@@ -1275,7 +1278,7 @@ public class SimRecorder : MonoBehaviour
             Debug.LogWarning($"[SimRecorder] {swarmType}: DBSCAN stability needs spawned agents and a swarm manager; recording to the {maxTime:F2}s duration.");
 
         // Stability rules already include their observation window; no additional dwell applies.
-        float dwellRequired = sampledDurationEnabled || wantsMotionSettle || wantsClusterStability
+        float dwellRequired = stopOnFirstMeasurement || sampledDurationEnabled || wantsMotionSettle || wantsClusterStability
             ? 0f : Mathf.Max(0f, settings.endConditionDwellTime);
         float heldFor = 0f;
 

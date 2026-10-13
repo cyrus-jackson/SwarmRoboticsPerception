@@ -286,7 +286,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f17bdcef3bbca4b5395f9ba096967b4f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SwarmTrajectoryPlayer
-  recordingsFolder: Assets/SimulationRecordings/Combinations/Dispersion
+  recordingsFolder: Assets/SimulationRecordings/Combinations/20261009_013408
+  enterReplayOnStart: 1
+  compareReferenceReplay: 1
+  initialRecording: type_dispersion_randommovement_40.00_perceptionrad_1.50_maxspeed_1.50_repeat_01
   toggleKey: 32
   playOnLoad: 1
   loop: 1
@@ -297,7 +300,7 @@ MonoBehaviour:
   framesPerScrollNotch: 5
   keyboardScrubs: 1
   matchRecordedSceneState: 1
-  showPerceptionRadius: 1
+  showPerceptionRadius: 0
   showHull: 1
   hullColor: {r: 0.15, g: 0.75, b: 1, a: 1}
   baselineHullColor: {r: 0.15, g: 0.75, b: 1, a: 0.3}
@@ -329,7 +332,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1891266687}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 841814d4c51da49039869fcb7df60c44, type: 3}
   m_Name: 

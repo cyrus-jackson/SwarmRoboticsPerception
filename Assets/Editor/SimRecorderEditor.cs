@@ -132,6 +132,16 @@ public class SimRecorderEditor : Editor
                 }
 
                 bool usesSampledDuration = endCondition.enumValueIndex == SampledOtherMotionDurationIndex;
+                bool stopOnFirstMeasurement = swarmType.enumValueIndex == (int)SwarmType.Dispersion &&
+                    (endCondition.enumValueIndex == DensityRatioReachedIndex ||
+                     endCondition.enumValueIndex == SpreadSettledIndex);
+                if (stopOnFirstMeasurement)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Dispersion's end condition fires on the first qualifying measurement. The stability " +
+                        "hold and additional dwell are ignored. End Delay, the Video Ended marker and the " +
+                        "Video Finished card still follow their configured settings.", MessageType.Info);
+                }
                 if (usesSampledDuration)
                 {
                     EditorGUILayout.HelpBox(
@@ -237,7 +247,8 @@ public class SimRecorderEditor : Editor
                 {
                     EditorGUILayout.Slider(settleTolerance, 0.001f, 0.1f,
                                            new GUIContent("Settle Slope Limit (frac of peak /s)"));
-                    EditorGUILayout.PropertyField(settleHoldTime, new GUIContent("Settle Hold (s)"));
+                    using (new EditorGUI.DisabledScope(stopOnFirstMeasurement))
+                        EditorGUILayout.PropertyField(settleHoldTime, new GUIContent("Settle Hold (s)"));
                 }
 
                 if (endCondition.enumValueIndex == SpreadSettledIndex)
@@ -284,7 +295,7 @@ public class SimRecorderEditor : Editor
 
                 // Both only mean something when a rule can fire. On FixedDuration there is no event
                 // to dwell on and no moment to pad, so they are greyed out rather than misleading.
-                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesSampledDuration || usesMotionSettling || usesClusterStability))
+                using (new EditorGUI.DisabledScope(endCondition.enumValueIndex == 0 || usesSampledDuration || usesMotionSettling || usesClusterStability || stopOnFirstMeasurement))
                 {
                     EditorGUILayout.PropertyField(dwell, new GUIContent("Dwell Before Ending (s)"));
                 }

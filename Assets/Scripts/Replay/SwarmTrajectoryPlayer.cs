@@ -3,15 +3,6 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-/// <summary>
-/// In-scene replay of a run captured by SwarmTrajectoryRecorder. Lives on the same object as UI in
-/// the simulation scene and takes over when the toggle key is pressed, so nothing has to be
-/// reassigned: the agent prefab, swarm manager, goal areas and walls all come from the UI.
-///
-/// While replaying, the live simulation is paused and its agents hidden, and a separate set of
-/// replay agents is driven straight from the file. Poses are read, never simulated, so scrubbing
-/// backwards costs exactly what scrubbing forwards does. Leaving replay restores everything.
-/// </summary>
 /// <summary>How the reference dispersion is drawn in the scene.</summary>
 public enum ReferenceOutlineMode
 {
@@ -41,6 +32,7 @@ public enum ReferenceOutlineMode
     EqualAreaCircle,
 }
 
+/// <summary>Replays recorded agent poses in the scene or in two matched comparison rows, restoring live state on exit.</summary>
 [RequireComponent(typeof(UI))]
 public class SwarmTrajectoryPlayer : MonoBehaviour
 {
@@ -51,6 +43,13 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     [Header("Source")]
     [Tooltip("Folder to list recordings from. Absolute, or relative to Assets, with or without a leading Assets/.")]
     public string recordingsFolder = "SimulationRecordings/Trajectories";
+
+    [Header("Comparison screen")]
+    public bool enterReplayOnStart = false;
+    [Tooltip("Replay the selected run in the top row and its matching zero-randomness recording below, at the same time and world scale.")]
+    public bool compareReferenceReplay = false;
+    [Tooltip("Optional recording name to open on entry, without .json.")]
+    public string initialRecording = "";
 
     [Header("Toggle")]
     [Tooltip("Enters and leaves replay mode.")]
@@ -115,6 +114,10 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     public SwarmTrajectory Trajectory => trajectory;
 
     private SwarmTrajectory trajectory;
+    private SwarmTrajectory referenceTrajectory;
+    private SwarmReplayComparisonView comparisonView;
+    private float PlaybackDuration => compareReferenceReplay && referenceTrajectory != null
+        ? Mathf.Max(trajectory.Duration, referenceTrajectory.Duration) : trajectory.Duration;
     private readonly List<Transform> spawned = new List<Transform>();
     private readonly List<LineRenderer> trails = new List<LineRenderer>();
     private Transform container;
@@ -164,6 +167,11 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         ResolveWiring();
     }
 
+    void Start()
+    {
+        if (enterReplayOnStart) EnterReplay();
+    }
+
     private void ResolveWiring()
     {
         if (uiController == null) uiController = GetComponent<UI>();
@@ -186,10 +194,10 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         {
             playhead += Time.deltaTime * speed;
 
-            if (playhead >= trajectory.Duration)
+            if (playhead >= PlaybackDuration)
             {
                 if (loop) playhead = 0f;
-                else { playhead = trajectory.Duration; isPlaying = false; }
+                else { playhead = PlaybackDuration; isPlaying = false; }
             }
         }
 
@@ -233,7 +241,11 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         IsReplaying = true;
         RefreshFileList();
 
-        if (availableFiles.Length > 0 && trajectory == null) LoadByIndex(0);
+        if (availableFiles.Length > 0 && trajectory == null)
+        {
+            int initialIndex = System.Array.IndexOf(availableFiles, initialRecording);
+            LoadByIndex(initialIndex >= 0 ? initialIndex : 0);
+        }
         else if (trajectory != null) { BuildAgents(); ApplyRecordedSceneState(); ApplyPlayhead(); }
 
         Debug.Log("[Replay] Entered replay mode.");
@@ -401,6 +413,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(name)) return false;
         if (name.Equals("batch_config", System.StringComparison.OrdinalIgnoreCase)) return false;
+        if (name.Equals("reference_hull_index", System.StringComparison.OrdinalIgnoreCase)) return false;
         return !name.EndsWith("_config", System.StringComparison.OrdinalIgnoreCase);
     }
 
@@ -410,7 +423,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     {
         DestroyReplayAgents();
 
-        if (trajectory == null) return;
+        if (trajectory == null || compareReferenceReplay) return;
 
         GameObject prefab = uiController != null ? uiController.agentPrefab : null;
         if (prefab == null)
@@ -551,14 +564,21 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         if (Keyboard.current.rightArrowKey.isPressed) StepFrames(step);
         if (Keyboard.current.spaceKey.wasPressedThisFrame) TogglePlay();
         if (Keyboard.current.homeKey.wasPressedThisFrame) SeekToFrame(0);
-        if (Keyboard.current.endKey.wasPressedThisFrame) SeekToFrame(trajectory.FrameCount - 1);
+        if (Keyboard.current.endKey.wasPressedThisFrame) SeekToTime(PlaybackDuration);
     }
 
     private void ApplyPlayhead()
     {
-        if (trajectory == null || trajectory.FrameCount == 0 || spawned.Count == 0) return;
+        if (trajectory == null || trajectory.FrameCount == 0) return;
 
         currentFrame = trajectory.FrameIndexAtTime(playhead);
+
+        if (compareReferenceReplay)
+        {
+            currentHullArea = AreaAtFrame(currentFrame);
+            return;
+        }
+        if (spawned.Count == 0) return;
 
         int nextFrame = Mathf.Min(currentFrame + 1, trajectory.FrameCount - 1);
         float blend = 0f;
@@ -642,13 +662,17 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     private void ResolveReferenceDispersion()
     {
         referenceEntry = null;
+        referenceTrajectory = null;
         referenceOutline.Clear();
         referenceHullAtPlateau.Clear();
         referenceCrossFrame = -1;
         referenceCrossTime = 0f;
         referenceStatus = "";
 
-        if (!showReferenceHull || trajectory == null) return;
+        if (trajectory == null) return;
+        if (comparisonView == null) comparisonView = new SwarmReplayComparisonView();
+        comparisonView.SetTrajectories(trajectory, null);
+        if (!showReferenceHull && !compareReferenceReplay) return;
 
         TrajectoryHeader h = trajectory.header;
 
@@ -686,6 +710,13 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         referenceEntry = entry;
         LoadReferenceHullOutline();
+        comparisonView.SetTrajectories(trajectory, referenceTrajectory);
+        if (referenceTrajectory == null)
+        {
+            if (string.IsNullOrEmpty(referenceStatus)) referenceStatus = "the reference trajectory could not be loaded";
+            referenceEntry = null;
+            return;
+        }
         FindReferenceCrossing();
 
         if (!entry.HasDirection)
@@ -783,13 +814,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         return referenceIndex;
     }
 
-    /// <summary>
-    /// Reads the reference's own hull at its plateau, so the scene can show the actual shape the
-    /// swarm settled into rather than a stand-in for its area.
-    ///
-    /// Loading the whole reference recording for one frame is heavy, but it happens once when a
-    /// recording is opened, and only the resulting outline is kept.
-    /// </summary>
+    /// <summary>Loads the matching reference trajectory and its hull at the plateau frame.</summary>
     private void LoadReferenceHullOutline()
     {
         referenceHullAtPlateau.Clear();
@@ -800,6 +825,22 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         SwarmTrajectory reference = SwarmTrajectory.Load(referenceEntry.sourcePath);
         if (reference == null || reference.FrameCount == 0) return;
+
+        TrajectoryHeader h = trajectory.header;
+        TrajectoryHeader r = reference.header;
+        if (!string.Equals(h.swarmType, r.swarmType, System.StringComparison.OrdinalIgnoreCase) ||
+            h.spawnLayoutId != r.spawnLayoutId || h.agentCount != r.agentCount ||
+            Mathf.Abs(r.randomMovement) > 0.001f ||
+            Mathf.Abs(h.perceptionRadius - r.perceptionRadius) > ReferenceHullIndex.RadiusTolerance ||
+            Mathf.Abs(h.maxSpeed - r.maxSpeed) > ReferenceHullIndex.SpeedTolerance ||
+            (!string.IsNullOrEmpty(h.spawnLayoutFingerprint) &&
+             h.spawnLayoutFingerprint != r.spawnLayoutFingerprint))
+        {
+            referenceStatus = "the reference does not match this recording's motion, spawn layout or settings";
+            referenceEntry = null;
+            return;
+        }
+        referenceTrajectory = reference;
 
         int frame = Mathf.Clamp(referenceEntry.plateauFrame, 0, reference.FrameCount - 1);
 
@@ -902,8 +943,19 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
     public void StepFrames(int delta)
     {
+        if (trajectory == null || trajectory.FrameCount == 0) return;
         isPlaying = false;
-        SeekToFrame(currentFrame + delta);
+        SwarmTrajectory timeline = compareReferenceReplay && referenceTrajectory != null &&
+            referenceTrajectory.Duration > trajectory.Duration ? referenceTrajectory : trajectory;
+        int frame = Mathf.Clamp(timeline.FrameIndexAtTime(playhead) + delta, 0, timeline.FrameCount - 1);
+        SeekToTime(timeline.frames[frame].t);
+    }
+
+    public void SeekToTime(float time)
+    {
+        if (trajectory == null || trajectory.FrameCount == 0) return;
+        playhead = Mathf.Clamp(time, 0f, PlaybackDuration);
+        ApplyPlayhead();
     }
 
     // ------------------------------------------------------------- panel
@@ -1047,6 +1099,14 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         EnsureStyles();
 
+        if (compareReferenceReplay && trajectory != null && comparisonView != null)
+        {
+            comparisonView.Draw(new Rect(PanelWidth + 28f, 12f,
+                Mathf.Max(1f, Screen.width - PanelWidth - 42f), Mathf.Max(1f, Screen.height - 24f)),
+                playhead, interpolate, showHull, showPerceptionRadius, showTrails, trailFrames,
+                hullTrimFraction, hullColor, referenceHullColor, referenceStatus, titleStyle, mutedStyle);
+        }
+
         float height = Mathf.Min(Screen.height - 24f, 760f);
         GUILayout.BeginArea(new Rect(14, 12, PanelWidth, height), GUIContent.none, panelStyle);
         panelScroll = GUILayout.BeginScrollView(panelScroll, GUIStyle.none, GUI.skin.verticalScrollbar);
@@ -1076,20 +1136,21 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         if (GUILayout.Button("|<", buttonStyle, GUILayout.Width(40))) SeekToFrame(0);
         if (GUILayout.Button("-1", buttonStyle, GUILayout.Width(40))) StepFrames(-1);
         if (GUILayout.Button("+1", buttonStyle, GUILayout.Width(40))) StepFrames(1);
-        if (GUILayout.Button(">|", buttonStyle, GUILayout.Width(40))) SeekToFrame(trajectory.FrameCount - 1);
+        if (GUILayout.Button(">|", buttonStyle, GUILayout.Width(40))) SeekToTime(PlaybackDuration);
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
         GUILayout.Space(4);
         Row("Frame", $"{currentFrame} / {trajectory.FrameCount - 1}");
-        Row("Time", $"{playhead:F2} s  of  {trajectory.Duration:F2} s");
+        Row("Time", $"{playhead:F2} s  of  {PlaybackDuration:F2} s");
 
         GUILayout.Space(2);
-        float scrubbed = GUILayout.HorizontalSlider(currentFrame, 0, trajectory.FrameCount - 1);
-        if (Mathf.RoundToInt(scrubbed) != currentFrame)
+        float scrubbed = GUILayout.HorizontalSlider(playhead, 0f, PlaybackDuration);
+        if (!Mathf.Approximately(scrubbed, playhead))
         {
             isPlaying = false;
-            SeekToFrame(Mathf.RoundToInt(scrubbed));
+            playhead = scrubbed;
+            ApplyPlayhead();
         }
 
         GUILayout.Space(6);
@@ -1103,6 +1164,18 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         loop = GUILayout.Toggle(loop, " Loop", toggleStyle);
         interpolate = GUILayout.Toggle(interpolate, " Interpolate between frames", toggleStyle);
         showHull = GUILayout.Toggle(showHull, " Show convex hull", toggleStyle);
+
+        bool hasSceneAgents = uiController != null && uiController.agentPrefab != null;
+        bool comparisonWanted = hasSceneAgents ? GUILayout.Toggle(compareReferenceReplay,
+            " Compare with zero-randomness replay (2 rows)", toggleStyle) : compareReferenceReplay;
+        if (comparisonWanted != compareReferenceReplay)
+        {
+            compareReferenceReplay = comparisonWanted;
+            ResolveReferenceDispersion();
+            BuildAgents();
+            playhead = Mathf.Min(playhead, PlaybackDuration);
+            ApplyPlayhead();
+        }
 
         bool perceptionWanted = GUILayout.Toggle(showPerceptionRadius, " Show perception radius", toggleStyle);
         bool trailsWanted = GUILayout.Toggle(showTrails, " Show trails", toggleStyle);
@@ -1310,5 +1383,204 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         Separator();
         GUILayout.Label($"wheel or arrows scrub  ·  shift for {framesPerScrollNotch} frames  ·  " +
                         $"space plays  ·  {toggleKey} returns to live", mutedStyle);
+    }
+
+    private void OnDestroy()
+    {
+        comparisonView?.Dispose();
+    }
+}
+
+/// <summary>Draws two recorded swarms using a shared world frame and timeline, without requiring scene prefabs.</summary>
+internal sealed class SwarmReplayComparisonView
+{
+    private SwarmTrajectory primary;
+    private SwarmTrajectory reference;
+    private Vector2 minimum;
+    private Vector2 maximum;
+    private Texture2D agentTexture;
+    private readonly List<Vector2> positions = new List<Vector2>();
+    private readonly List<Vector2> hull = new List<Vector2>();
+    private readonly List<List<Vector2>> primaryGeometry = new List<List<Vector2>>();
+    private readonly List<List<Vector2>> referenceGeometry = new List<List<Vector2>>();
+
+    public void SetTrajectories(SwarmTrajectory run, SwarmTrajectory zeroRandomness)
+    {
+        primary = run;
+        reference = zeroRandomness;
+        minimum = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+        maximum = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+        IncludeTrajectory(primary, primaryGeometry);
+        IncludeTrajectory(reference, referenceGeometry);
+        if (primary == null) { minimum = -Vector2.one; maximum = Vector2.one; }
+        Vector2 padding = Vector2.Max((maximum - minimum) * 0.04f, Vector2.one * 0.5f);
+        minimum -= padding;
+        maximum += padding;
+    }
+
+    private void IncludeTrajectory(SwarmTrajectory clip, List<List<Vector2>> geometry)
+    {
+        geometry.Clear();
+        if (clip == null) return;
+        // Bounds cover the entire pair, so neither playback nor row changes the apparent scale.
+        for (int f = 0; f < clip.FrameCount; f++)
+            for (int i = 0; i < clip.AgentCount; i++) IncludePoint(clip.GetPosition(f, i));
+        if (clip.header.geometry == null) return;
+        foreach (TrajectoryGeometry shape in clip.header.geometry)
+        {
+            List<Vector2> outline = shape.BuildOutline();
+            geometry.Add(outline);
+            foreach (Vector2 point in outline) IncludePoint(point);
+        }
+    }
+
+    private void IncludePoint(Vector2 point)
+    {
+        minimum = Vector2.Min(minimum, point);
+        maximum = Vector2.Max(maximum, point);
+    }
+
+    public void Draw(Rect screen, float time, bool interpolate, bool showHull, bool showPerception,
+        bool showTrails, int trailFrames, float trim, Color primaryColor, Color referenceColor,
+        string missingReason, GUIStyle title, GUIStyle caption)
+    {
+        if (primary == null) return;
+        EnsureAgentTexture();
+        float rowHeight = Mathf.Max(1f, (screen.height - 10f) * 0.5f);
+        Rect top = new Rect(screen.x, screen.y, screen.width, rowHeight);
+        Rect bottom = new Rect(screen.x, screen.y + rowHeight + 10f, screen.width, rowHeight);
+        DrawRow(top, primary, primaryGeometry, time, interpolate, showHull, showPerception,
+            showTrails, trailFrames, trim, primaryColor,
+            $"{primary.header.swarmType} · random {primary.header.randomMovement:0.##}", title, caption);
+        if (reference != null)
+        {
+            DrawRow(bottom, reference, referenceGeometry, time, interpolate, showHull, showPerception,
+                showTrails, trailFrames, trim, referenceColor, "Zero-randomness reference · random 0", title, caption);
+        }
+        else
+        {
+            Fill(bottom, new Color(0.07f, 0.08f, 0.10f));
+            GUI.Label(new Rect(bottom.x + 12f, bottom.y + 8f, bottom.width - 24f, 24f),
+                "Zero-randomness reference unavailable", title);
+            GUI.Label(new Rect(bottom.x + 12f, bottom.y + 40f, bottom.width - 24f, 80f),
+                string.IsNullOrEmpty(missingReason) ? "Choose a randomized recording with a matching spawn layout." : missingReason, caption);
+        }
+    }
+
+    private void DrawRow(Rect row, SwarmTrajectory clip, List<List<Vector2>> geometry, float time,
+        bool interpolate, bool showHull, bool showPerception, bool showTrails, int trailFrames,
+        float trim, Color color, string heading, GUIStyle title, GUIStyle caption)
+    {
+        Fill(row, new Color(0.07f, 0.08f, 0.10f));
+        GUI.BeginGroup(row);
+        GUI.Label(new Rect(12f, 6f, row.width - 24f, 24f), heading, title);
+        Rect plot = new Rect(12f, 34f, Mathf.Max(1f, row.width - 24f), Mathf.Max(1f, row.height - 64f));
+        Vector2 size = maximum - minimum;
+        float scale = Mathf.Min(plot.width / size.x, plot.height / size.y);
+        Vector2 centre = (maximum + minimum) * 0.5f;
+        GUI.BeginClip(plot);
+        Vector2 plotCentre = plot.size * 0.5f;
+        foreach (List<Vector2> outline in geometry)
+            DrawOutline(outline, centre, plotCentre, scale, new Color(0.4f, 0.44f, 0.49f), 1f);
+
+        float clipTime = Mathf.Min(time, clip.Duration);
+        int frame = clip.FrameIndexAtTime(clipTime);
+        int next = Mathf.Min(frame + 1, clip.FrameCount - 1);
+        float span = clip.frames[next].t - clip.frames[frame].t;
+        float blend = interpolate && span > 0f ? Mathf.Clamp01((clipTime - clip.frames[frame].t) / span) : 0f;
+        positions.Clear();
+        for (int i = 0; i < clip.AgentCount; i++)
+        {
+            Vector2 position = Vector2.Lerp(clip.GetPosition(frame, i), clip.GetPosition(next, i), blend);
+            positions.Add(position);
+            Vector2 pixel = Project(position, centre, plotCentre, scale);
+            if (showPerception)
+                DrawCircle(pixel, clip.header.perceptionRadius * scale, new Color(color.r, color.g, color.b, 0.16f));
+            if (showTrails)
+            {
+                int first = Mathf.Max(0, frame - Mathf.Max(1, trailFrames));
+                for (int f = first; f < frame; f++)
+                    DrawLine(Project(clip.GetPosition(f, i), centre, plotCentre, scale),
+                        Project(clip.GetPosition(f + 1, i), centre, plotCentre, scale),
+                        new Color(color.r, color.g, color.b, 0.35f), 1f);
+            }
+            float radius = Mathf.Max(2f, (clip.header.agentRadius > 0f ? clip.header.agentRadius : 0.156f) * scale);
+            Color previous = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(pixel.x - radius, pixel.y - radius, radius * 2f, radius * 2f), agentTexture);
+            GUI.color = previous;
+        }
+        float area = SwarmDensityMetrics.TrimmedHull(positions, trim, hull, null);
+        if (showHull) DrawOutline(hull, centre, plotCentre, scale, color, 1.5f);
+        GUI.EndClip();
+        string held = time >= clip.Duration ? " · holding final frame" : "";
+        GUI.Label(new Rect(12f, row.height - 26f, row.width - 24f, 24f),
+            $"{clipTime:F2} / {clip.Duration:F2} s · frame {frame} · area {area:F2} u² · R {clip.header.perceptionRadius:0.##} · speed {clip.header.maxSpeed:0.##}{held}", caption);
+        GUI.EndGroup();
+    }
+
+    private static Vector2 Project(Vector2 point, Vector2 centre, Vector2 pixelCentre, float scale)
+    {
+        Vector2 offset = (point - centre) * scale;
+        return pixelCentre + new Vector2(offset.x, -offset.y);
+    }
+
+    private static void DrawOutline(List<Vector2> points, Vector2 centre, Vector2 pixelCentre,
+        float scale, Color color, float width)
+    {
+        if (points.Count < 2) return;
+        for (int i = 0; i < points.Count; i++)
+            DrawLine(Project(points[i], centre, pixelCentre, scale),
+                Project(points[(i + 1) % points.Count], centre, pixelCentre, scale), color, width);
+    }
+
+    private static void DrawCircle(Vector2 centre, float radius, Color color)
+    {
+        const int segments = 48;
+        Vector2 previous = centre + Vector2.right * radius;
+        for (int i = 1; i <= segments; i++)
+        {
+            float angle = i * Mathf.PI * 2f / segments;
+            Vector2 next = centre + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
+            DrawLine(previous, next, color, 1f);
+            previous = next;
+        }
+    }
+
+    private static void DrawLine(Vector2 from, Vector2 to, Color color, float width)
+    {
+        Matrix4x4 previous = GUI.matrix;
+        Vector2 delta = to - from;
+        GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, from);
+        Fill(new Rect(from.x, from.y - width * 0.5f, delta.magnitude, width), color);
+        GUI.matrix = previous;
+    }
+
+    private static void Fill(Rect rect, Color color)
+    {
+        Color previous = GUI.color;
+        GUI.color = color;
+        GUI.DrawTexture(rect, Texture2D.whiteTexture);
+        GUI.color = previous;
+    }
+
+    private void EnsureAgentTexture()
+    {
+        if (agentTexture != null) return;
+        const int size = 32;
+        agentTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float distance = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), Vector2.one * (size * 0.5f));
+                agentTexture.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(size * 0.5f - distance)));
+            }
+        agentTexture.Apply();
+    }
+
+    public void Dispose()
+    {
+        if (agentTexture != null) Object.Destroy(agentTexture);
+        agentTexture = null;
     }
 }
