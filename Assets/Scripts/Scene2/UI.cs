@@ -121,6 +121,8 @@ public class UI : MonoBehaviour
 
     void Start()
     {
+        SwarmTrajectoryPlayer player = GetComponent<SwarmTrajectoryPlayer>();
+        if (player != null && player.isActiveAndEnabled && player.enterReplayOnStart) return;
         if (swarmManager != null)
         {
             swarmManager.enabled = false;

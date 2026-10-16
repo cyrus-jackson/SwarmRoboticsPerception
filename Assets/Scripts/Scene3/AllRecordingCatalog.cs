@@ -74,8 +74,11 @@ public static class AllRecordingCatalog
     {
         public Clip[] clips;
         public string title;
+        public bool titleOnly;
+        public bool showEndLabels = true;
         public string outputLabel;
         public string[] labels;
+        public float labelHeight = 24f;
     }
 
     public static Grid[] PlanGrids(string folder, Batch batch = null)

@@ -20,6 +20,7 @@ public class SwarmTrajectory
 {
     /// <summary>Floats stored per agent per frame: x, y, rotation, vx, vy.</summary>
     public const int Stride = 5;
+    public const int StateStride = 5;
 
     public TrajectoryHeader header = new TrajectoryHeader();
     public List<TrajectoryFrame> frames = new List<TrajectoryFrame>();
@@ -154,11 +155,10 @@ public class SwarmTrajectory
     /// one string in memory, roughly double the file size in UTF-16, right at the moment the video
     /// encoder is under most pressure. Writing frame by frame keeps the peak flat.
     ///
-    /// Floats are written at limited precision. JsonUtility emits full round-trip precision
-    /// (-7.2500000953674316), about 19 bytes per value; three decimals is millimetre resolution in
-    /// world units and roughly a third of the size.
+    /// Floats use round-trip precision by default so saved poses and timestamps remain exact.
+    /// A caller may explicitly request rounding for a smaller, lossy export.
     /// </summary>
-    public void Save(string path, int decimals = 3)
+    public void Save(string path, int decimals = -1)
     {
         string directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -169,7 +169,7 @@ public class SwarmTrajectory
         header.frameCount = FrameCount;
         header.duration = Duration;
 
-        string format = "0." + new string('#', Mathf.Clamp(decimals, 1, 7));
+        string format = decimals < 0 ? "R" : "0." + new string('#', Mathf.Clamp(decimals, 1, 7));
         CultureInfo invariant = CultureInfo.InvariantCulture;
 
         using (StreamWriter writer = new StreamWriter(path, false))
@@ -196,6 +196,15 @@ public class SwarmTrajectory
                     writer.Write(frame.v[i].ToString(format, invariant));
                 }
 
+                writer.Write("],\"s\":[");
+                if (frame.s != null)
+                {
+                    for (int i = 0; i < frame.s.Count; i++)
+                    {
+                        if (i > 0) writer.Write(',');
+                        writer.Write(frame.s[i].ToString(format, invariant));
+                    }
+                }
                 writer.Write("],\"c\":[");
                 if (frame.c != null)
                 {
@@ -225,21 +234,34 @@ public class SwarmTrajectory
 
     public static SwarmTrajectory Load(string path)
     {
-        if (!File.Exists(path))
+        try
         {
-            Debug.LogError($"[SwarmTrajectory] No file at {path}");
+            SwarmTrajectory trajectory = JsonUtility.FromJson<SwarmTrajectory>(File.ReadAllText(path));
+            if (trajectory == null || trajectory.header == null || trajectory.AgentCount <= 0 ||
+                trajectory.FrameCount == 0) throw new InvalidDataException("No recorded agents or frames.");
+            float previous = -1f;
+            foreach (TrajectoryFrame frame in trajectory.frames)
+            {
+                if (frame == null || !Finite(frame.t) || frame.t < 0f || frame.t <= previous ||
+                    frame.v == null || frame.v.Count != trajectory.AgentCount * Stride ||
+                    frame.v.Exists(value => !Finite(value)))
+                    throw new InvalidDataException("Invalid timestamp or agent pose data.");
+                if (trajectory.header.agentStatesRecorded && (frame.s == null ||
+                    frame.s.Count != trajectory.AgentCount * StateStride || frame.s.Exists(value => !Finite(value))))
+                    throw new InvalidDataException("Invalid agent state data.");
+                previous = frame.t;
+            }
+            return trajectory;
+        }
+        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException ||
+                                     error is ArgumentException)
+        {
+            Debug.LogError($"[SwarmTrajectory] Cannot load {path}: {error.Message}");
             return null;
         }
-
-        SwarmTrajectory trajectory = JsonUtility.FromJson<SwarmTrajectory>(File.ReadAllText(path));
-        if (trajectory == null || trajectory.frames == null)
-        {
-            Debug.LogError($"[SwarmTrajectory] Could not parse {path}");
-            return null;
-        }
-
-        return trajectory;
     }
+
+    private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 }
 
 /// <summary>One captured frame: a timestamp and the packed per-agent values.</summary>
@@ -251,6 +273,9 @@ public class TrajectoryFrame
 
     /// <summary>Packed values, SwarmTrajectory.Stride floats per agent.</summary>
     public List<float> v = new List<float>();
+
+    /// <summary>Per-agent z, world scale x/y/z, and active flag, in the same stable slot order as v.</summary>
+    public List<float> s = new List<float>();
 
     /// <summary>
     /// Indices of the agents touching a wall on this frame. Stored as a sparse index list rather
@@ -314,6 +339,9 @@ public class TrajectoryHeader
     public float clusterPerceptionRadius;  // radius the graph was built with, for reproducibility
 
     public string[] agentNames;
+    public bool agentStatesRecorded;
+    public TrajectoryCamera camera;
+    public bool cameraRecorded;
 
     // Swarm parameters in force during the run.
     public float cohesion;
@@ -365,6 +393,10 @@ public class TrajectoryGeometry
     public string name;
     public string role;
     public string shape;
+    public bool transformRecorded;
+    public Vector3 position;
+    public Quaternion orientation;
+    public Vector3 scale;
 
     /// <summary>World centre.</summary>
     public float x;
@@ -428,4 +460,16 @@ public class TrajectoryGeometry
 
         return outline;
     }
+}
+
+/// <summary>Camera framing captured at the start of a run.</summary>
+[Serializable]
+public class TrajectoryCamera
+{
+    public Vector3 position;
+    public Quaternion rotation;
+    public bool orthographic;
+    public float orthographicSize;
+    public float fieldOfView;
+    public Color backgroundColor;
 }

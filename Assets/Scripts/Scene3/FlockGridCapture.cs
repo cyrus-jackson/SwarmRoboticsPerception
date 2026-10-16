@@ -20,8 +20,11 @@ internal sealed class FlockGridCapture
     /// Motion type for the file name. Defaults to "flocking" so existing callers are unchanged;
     /// AllGridManager passes its own, otherwise a Dispersion grid would save as a flocking one.
     /// </param>
-    public void Start(float speed, float perception, string label = "flocking", string outputFolder = null, bool includeParameters = true)
+    public void Start(float speed, float perception, string label = "flocking", string outputFolder = null,
+        bool includeParameters = true, int outputWidth = 1920, int outputHeight = 1080)
     {
+        if (outputWidth < 16 || outputHeight < 16 || outputWidth % 2 != 0 || outputHeight % 2 != 0)
+            throw new ArgumentException("Recording width and height must be even numbers of at least 16 pixels.");
         string folder = Path.GetFullPath(outputFolder ?? Path.Combine(Application.dataPath, "..", "Grid Recordings"));
         Directory.CreateDirectory(folder);
         if (string.IsNullOrWhiteSpace(label)) label = "grid";
@@ -45,7 +48,7 @@ internal sealed class FlockGridCapture
             EncodingQuality = CoreEncoderSettings.VideoEncodingQuality.High
         };
         movieSettings.OutputFile = Path.Combine(folder, name + "_partial");
-        movieSettings.ImageInputSettings = new GameViewInputSettings { OutputWidth = 1920, OutputHeight = 1080 };
+        movieSettings.ImageInputSettings = new GameViewInputSettings { OutputWidth = outputWidth, OutputHeight = outputHeight };
         movieSettings.AudioInputSettings.PreserveAudio = false;
         controllerSettings.AddRecorderSettings(movieSettings);
         controllerSettings.SetRecordModeToManual();

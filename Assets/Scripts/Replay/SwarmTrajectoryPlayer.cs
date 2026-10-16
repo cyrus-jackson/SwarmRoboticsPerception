@@ -1,7 +1,13 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.InputSystem;
+
+#if UNITY_EDITOR
+using UnityEditor.Recorder;
+using UnityEditor.Recorder.Input;
+#endif
 
 /// <summary>How the reference dispersion is drawn in the scene.</summary>
 public enum ReferenceOutlineMode
@@ -55,12 +61,25 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     [Tooltip("Enters and leaves replay mode.")]
     public Key toggleKey = Key.R;
 
+    [Header("Panel")]
+    public bool showPanel = true;
+    [Tooltip("Hide or show the replay panel without changing playback.")]
+    public Key panelToggleKey = Key.X;
+
+    [Header("Replay Video Recording")]
+    public string videoSaveFolder = "SimulationRecordings/ReplayVideos";
+    [Range(1, 120)] public int videoFrameRate = 60;
+    [Min(16)] public int videoWidth = 1280;
+    [Min(16)] public int videoHeight = 720;
+    public bool hidePanelInVideo = true;
+    public Key recordVideoKey = Key.F9;
+
     [Header("Playback")]
     public bool playOnLoad = true;
     public bool loop = true;
     [Range(0.1f, 4f)] public float speed = 1f;
     [Tooltip("Interpolate between captured frames. Off shows exactly the captured poses.")]
-    public bool interpolate = true;
+    public bool interpolate = false;
     public bool applyRotation = true;
 
     [Header("Scrubbing")]
@@ -162,6 +181,400 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     private bool savedDensityMonitorEnabled;
     private readonly List<GameObject> hiddenLiveAgents = new List<GameObject>();
 
+    public bool IsRecordingVideo { get; private set; }
+    public string LastVideoPath { get; private set; }
+    private bool PanelVisible => showPanel && !(IsRecordingVideo && hidePanelInVideo);
+    private string videoStatus = "";
+
+#if UNITY_EDITOR
+    private RecorderController videoController;
+    private RecorderControllerSettings videoControllerSettings;
+    private MovieRecorderSettings videoRecorderSettings;
+    private Coroutine videoRoutine;
+    private ReplayVideoSettings videoExport;
+    private string videoOutputStem;
+    private int videoFramesRendered;
+    private float videoLastFrameTime;
+    private bool videoStarted;
+    private bool videoCompleted;
+    private float beforeVideoPlayhead;
+    private bool beforeVideoPlaying;
+#endif
+
+    public bool StartReplayVideoRecording()
+    {
+#if UNITY_EDITOR
+        if (IsRecordingVideo) return false;
+        if (!Application.isPlaying || !isActiveAndEnabled || !IsReplaying || trajectory == null || trajectory.FrameCount == 0)
+        {
+            videoStatus = "Load a replay in Play mode before recording.";
+            return false;
+        }
+        if (videoFrameRate < 1 || videoFrameRate > 120 || videoWidth < 16 || videoHeight < 16 ||
+            videoWidth % 2 != 0 || videoHeight % 2 != 0 || speed <= 0f || float.IsNaN(speed) || float.IsInfinity(speed))
+        {
+            videoStatus = "Use 1–120 fps, even image dimensions of at least 16 pixels, and a positive playback speed.";
+            return false;
+        }
+
+        beforeVideoPlayhead = playhead;
+        beforeVideoPlaying = isPlaying;
+        try
+        {
+            string folder = (videoSaveFolder ?? "").Trim();
+            if (string.IsNullOrEmpty(folder)) throw new System.ArgumentException("Choose a video save folder.");
+            if (!Path.IsPathRooted(folder))
+            {
+                if (folder.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase)) folder = folder.Substring(7);
+                folder = Path.Combine(Application.dataPath, folder);
+            }
+            Directory.CreateDirectory(folder);
+            string sourceName = string.IsNullOrEmpty(loadedPath) ? "replay" : Path.GetFileNameWithoutExtension(loadedPath);
+            string stem = Path.Combine(folder, $"{sourceName}_replay_{System.DateTime.Now:yyyyMMdd_HHmmss_fff}");
+            videoOutputStem = stem;
+            int suffix = 1;
+            while (File.Exists(videoOutputStem + ".mp4") || File.Exists(videoOutputStem + "_settings.json"))
+                videoOutputStem = stem + "_" + suffix++;
+
+            ResolveReferenceDispersion();
+            ComputeBaselineHull();
+            videoExport = new ReplayVideoSettings
+            {
+                sourceTrajectory = loadedPath,
+                referenceTrajectory = compareReferenceReplay && referenceEntry != null ? referenceEntry.sourcePath : null,
+                recordedAtUtc = System.DateTime.UtcNow.ToString("o"),
+                frameRate = videoFrameRate, width = videoWidth, height = videoHeight,
+                playbackSpeed = speed, replayDuration = PlaybackDuration,
+                interpolate = interpolate, applyRotation = applyRotation,
+                showPerceptionRadius = showPerceptionRadius, showHull = showHull,
+                showReferenceHull = showReferenceHull, referenceOutlineMode = referenceOutline_Mode.ToString(),
+                compareReferenceReplay = compareReferenceReplay, showTrails = showTrails,
+                trailFrames = trailFrames, trailWidth = trailWidth, trailColor = trailColor,
+                hullTrimFraction = hullTrimFraction, hullLineWidth = hullLineWidth,
+                hullColor = hullColor, baselineHullColor = baselineHullColor, referenceHullColor = referenceHullColor,
+                panelIncluded = showPanel && !hidePanelInVideo
+            };
+            videoFramesRendered = 0;
+            videoLastFrameTime = 0f;
+            videoStarted = false;
+            videoCompleted = false;
+            IsRecordingVideo = true;
+            isPlaying = false;
+            playhead = 0f;
+            BuildAgents();
+            ApplyPlayhead();
+
+            videoControllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+            videoControllerSettings.ExitPlayMode = false;
+            videoControllerSettings.FrameRate = videoFrameRate;
+            videoControllerSettings.FrameRatePlayback = FrameRatePlayback.Constant;
+            videoControllerSettings.SetRecordModeToManual();
+            videoRecorderSettings = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+            videoRecorderSettings.name = "Replay Video";
+            videoRecorderSettings.Enabled = true;
+            videoRecorderSettings.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+            videoRecorderSettings.OutputFile = videoOutputStem;
+            videoRecorderSettings.CaptureAudio = false;
+            videoRecorderSettings.ImageInputSettings = new GameViewInputSettings
+            {
+                OutputWidth = videoWidth, OutputHeight = videoHeight
+            };
+            videoControllerSettings.AddRecorderSettings(videoRecorderSettings);
+            videoController = new RecorderController(videoControllerSettings);
+            videoController.PrepareRecording();
+            videoStatus = $"Recording replay… {recordVideoKey} stops and saves.";
+            videoRoutine = StartCoroutine(RecordReplayVideo());
+            return true;
+        }
+        catch (System.Exception error)
+        {
+            FinishReplayVideo();
+            videoStatus = $"Could not record: {error.Message}";
+            Debug.LogError($"[Replay] {videoStatus}");
+            return false;
+        }
+#else
+        videoStatus = "Replay video recording is available in the Unity Editor.";
+        return false;
+#endif
+    }
+
+    public void StopReplayVideoRecording()
+    {
+#if UNITY_EDITOR
+        if (!IsRecordingVideo) return;
+        Coroutine routine = videoRoutine;
+        videoRoutine = null;
+        if (routine != null) StopCoroutine(routine);
+        if (IsRecordingVideo) FinishReplayVideo();
+#endif
+    }
+
+#if UNITY_EDITOR
+    private IEnumerator RecordReplayVideo()
+    {
+        try
+        {
+            // Prepare the recorder and opening pose for a whole frame before the first capture.
+            yield return null;
+            if (!videoController.StartRecording())
+            {
+                videoStatus = "The video encoder could not start. Check the Unity Console.";
+                yield break;
+            }
+            videoStarted = true;
+            // Recorder holds its first frame for a resolution change; keep the opening pose during that wait.
+            yield return new WaitForEndOfFrame();
+            int frames = Mathf.CeilToInt(videoExport.replayDuration * videoExport.frameRate / videoExport.playbackSpeed) + 1;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                if (!videoController.IsRecording()) throw new System.InvalidOperationException("The video encoder stopped before replay ended.");
+                // Step after the previous render so perception rings update before the next render.
+                playhead = Mathf.Min(videoExport.replayDuration, frame * videoExport.playbackSpeed / videoExport.frameRate);
+                ApplyPlayhead();
+                yield return new WaitForEndOfFrame();
+                videoFramesRendered = frame + 1;
+                videoLastFrameTime = playhead;
+            }
+            // Recorder captures at end of frame too; let it capture the final pose before stopping.
+            yield return null;
+            videoCompleted = true;
+        }
+        finally
+        {
+            FinishReplayVideo();
+        }
+    }
+
+    private void FinishReplayVideo()
+    {
+        if (!IsRecordingVideo) return;
+        bool save = videoStarted && videoFramesRendered > 0;
+        try
+        {
+            videoController?.StopRecording();
+            if (save)
+            {
+                string path = videoOutputStem + ".mp4";
+                if (!File.Exists(path) || new FileInfo(path).Length == 0)
+                    throw new IOException("The encoder did not create a video file.");
+                videoExport.completed = videoCompleted;
+                videoExport.frames = videoFramesRendered;
+                videoExport.replayEndTime = videoLastFrameTime;
+                playhead = videoLastFrameTime;
+                ApplyPlayhead();
+                File.WriteAllText(videoOutputStem + "_settings.json", JsonUtility.ToJson(videoExport, true));
+                LastVideoPath = path;
+                videoStatus = $"Saved{(videoCompleted ? "" : " partial replay")}: {Path.GetFileName(path)}";
+                Debug.Log($"[Replay] {videoStatus}\n{path}");
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(videoOutputStem) && File.Exists(videoOutputStem + ".mp4"))
+                    File.Delete(videoOutputStem + ".mp4");
+                if (videoStarted) videoStatus = "Recording canceled before the first frame.";
+                playhead = beforeVideoPlayhead;
+                isPlaying = beforeVideoPlaying;
+            }
+        }
+        catch (System.Exception error)
+        {
+            videoStatus = $"Recording could not be saved: {error.Message}";
+            Debug.LogError($"[Replay] {videoStatus}");
+        }
+        finally
+        {
+            IsRecordingVideo = false;
+            videoRoutine = null;
+            videoController = null;
+            if (videoControllerSettings != null) Destroy(videoControllerSettings);
+            if (videoRecorderSettings != null) Destroy(videoRecorderSettings);
+            videoControllerSettings = null;
+            videoRecorderSettings = null;
+        }
+    }
+
+    /// <summary>Stores the source and selected display settings alongside an exported replay video.</summary>
+    [System.Serializable]
+    private sealed class ReplayVideoSettings
+    {
+        public string sourceTrajectory;
+        public string referenceTrajectory;
+        public string recordedAtUtc;
+        public int frameRate, width, height, frames;
+        public float playbackSpeed, replayDuration, replayEndTime;
+        public bool completed, panelIncluded, interpolate, applyRotation;
+        public bool showPerceptionRadius, showHull, showReferenceHull, showTrails, compareReferenceReplay;
+        public string referenceOutlineMode;
+        public int trailFrames;
+        public float trailWidth, hullTrimFraction, hullLineWidth;
+        public Color trailColor, hullColor, baselineHullColor, referenceHullColor;
+    }
+#endif
+
+    private void DrawVideoRecording()
+    {
+        Section("Record replay video");
+#if UNITY_EDITOR
+        if (IsRecordingVideo)
+        {
+            if (GUILayout.Button($"Stop and save ({recordVideoKey})", buttonStyle)) StopReplayVideoRecording();
+        }
+        else
+        {
+            hidePanelInVideo = GUILayout.Toggle(hidePanelInVideo, " Hide panel in video", toggleStyle);
+            bool enabled = GUI.enabled;
+            GUI.enabled = enabled && trajectory != null;
+            if (GUILayout.Button($"Record replay video ({recordVideoKey})", buttonStyle)) StartReplayVideoRecording();
+            GUI.enabled = enabled;
+            GUILayout.Label("Records one pass from the start using the selected visual options and speed.", mutedStyle);
+            GUILayout.Label($"{videoWidth} × {videoHeight} · {videoFrameRate} fps · folder: {videoSaveFolder}", mutedStyle);
+        }
+#else
+        GUILayout.Label("Video recording is available in the Unity Editor.", mutedStyle);
+#endif
+        if (!string.IsNullOrEmpty(videoStatus)) GUILayout.Label(videoStatus, statusStyle);
+        Separator();
+    }
+
+    private readonly List<ReplaySceneState> savedSceneState = new List<ReplaySceneState>();
+    private Camera replayCamera;
+    private TrajectoryCamera savedCamera;
+
+    private void CaptureSceneState()
+    {
+        savedSceneState.Clear();
+        foreach (GameObject root in gameObject.scene.GetRootGameObjects())
+            foreach (Transform target in root.GetComponentsInChildren<Transform>(true))
+                savedSceneState.Add(new ReplaySceneState(target));
+        replayCamera = Camera.main;
+        if (replayCamera != null)
+        {
+            savedCamera = new TrajectoryCamera
+            {
+                position = replayCamera.transform.position,
+                rotation = replayCamera.transform.rotation,
+                orthographic = replayCamera.orthographic,
+                orthographicSize = replayCamera.orthographicSize,
+                fieldOfView = replayCamera.fieldOfView,
+                backgroundColor = replayCamera.backgroundColor
+            };
+        }
+    }
+
+    private void RestoreSceneState()
+    {
+        foreach (ReplaySceneState state in savedSceneState) state.Restore();
+        ApplyCamera(savedCamera);
+    }
+
+    private void ApplyCamera(TrajectoryCamera framing)
+    {
+        if (framing == null || replayCamera == null) return;
+        replayCamera.transform.SetPositionAndRotation(framing.position, framing.rotation);
+        replayCamera.orthographic = framing.orthographic;
+        replayCamera.orthographicSize = framing.orthographicSize;
+        replayCamera.fieldOfView = framing.fieldOfView;
+        replayCamera.backgroundColor = framing.backgroundColor;
+    }
+
+    private void ApplyGeometry(List<TrajectoryGeometry> geometry)
+    {
+        var candidates = new HashSet<Transform>();
+        if (uiController.walls != null)
+            foreach (Transform wall in uiController.walls) if (wall != null) candidates.Add(wall);
+        if (uiController.obstacles != null)
+            foreach (Transform obstacle in uiController.obstacles) if (obstacle != null) candidates.Add(obstacle);
+        if (uiController.spawnAreas != null)
+            foreach (Transform area in uiController.spawnAreas) if (area != null) candidates.Add(area);
+        Transform[] areas = { uiController.circleSpawnArea, uiController.densificationSpawnArea,
+            uiController.flockingSpawnArea, uiController.flockingGoalArea, uiController.densificationGoalArea,
+            uiController.randomGoalArea, uiController.dispersionGoalArea };
+        foreach (Transform area in areas) if (area != null) candidates.Add(area);
+        foreach (ReplaySceneState state in savedSceneState)
+        {
+            Transform target = state.Target;
+            if (target == null || target.gameObject == uiController.agentPrefab) continue;
+            if (target.name.Contains("Obstacle") && target.GetComponent<Collider2D>() != null)
+                candidates.Add(target);
+        }
+        foreach (Transform candidate in candidates) candidate.gameObject.SetActive(false);
+        foreach (TrajectoryGeometry shape in geometry)
+        {
+            if (shape == null) continue;
+            ReplaySceneState state = savedSceneState.Find(item => item.Target != null && item.Target.name == shape.name);
+            if (state == null)
+            {
+                Debug.LogWarning($"[Replay] Recorded geometry '{shape.name}' is missing from this scene.");
+                continue;
+            }
+            Transform target = state.Target;
+            target.gameObject.SetActive(true);
+            if (shape.transformRecorded)
+            {
+                SetWorldScale(target, shape.scale);
+                target.SetPositionAndRotation(shape.position, shape.orientation);
+                continue;
+            }
+            // Legacy files carry collider geometry only; retain the original scene's sprite and material.
+            target.rotation = Quaternion.AngleAxis(shape.rotation, Vector3.forward);
+            BoxCollider2D box = target.GetComponent<BoxCollider2D>();
+            CircleCollider2D circle = target.GetComponent<CircleCollider2D>();
+            Vector2 offset = Vector2.zero;
+            Vector3 scale = target.lossyScale;
+            if (shape.shape == TrajectoryGeometry.ShapeBox && box != null)
+            {
+                scale.x = Mathf.Sign(scale.x) * shape.width / Mathf.Max(0.0001f, box.size.x);
+                scale.y = Mathf.Sign(scale.y) * shape.height / Mathf.Max(0.0001f, box.size.y);
+                offset = box.offset;
+            }
+            else if (shape.shape == TrajectoryGeometry.ShapeCircle && circle != null)
+            {
+                float factor = shape.radius / Mathf.Max(0.0001f, circle.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y)));
+                scale.x *= factor;
+                scale.y *= factor;
+                offset = circle.offset;
+            }
+            SetWorldScale(target, scale);
+            Vector3 centreOffset = target.TransformVector(offset);
+            target.position = new Vector3(shape.x - centreOffset.x, shape.y - centreOffset.y, target.position.z);
+        }
+    }
+
+    private static void SetWorldScale(Transform target, Vector3 scale)
+    {
+        Vector3 parentScale = target.parent != null ? target.parent.lossyScale : Vector3.one;
+        target.localScale = new Vector3(scale.x / parentScale.x, scale.y / parentScale.y, scale.z / parentScale.z);
+    }
+
+    /// <summary>Retains the original transform and activation of a scene object for replay exit or clip changes.</summary>
+    private sealed class ReplaySceneState
+    {
+        public Transform Target { get; }
+        private readonly Vector3 position;
+        private readonly Quaternion rotation;
+        private readonly Vector3 scale;
+        private readonly bool active;
+
+        public ReplaySceneState(Transform target)
+        {
+            Target = target;
+            position = target.localPosition;
+            rotation = target.localRotation;
+            scale = target.localScale;
+            active = target.gameObject.activeSelf;
+        }
+
+        public void Restore()
+        {
+            if (Target == null) return;
+            Target.localPosition = position;
+            Target.localRotation = rotation;
+            Target.localScale = scale;
+            Target.gameObject.SetActive(active);
+        }
+    }
+
     void Awake()
     {
         ResolveWiring();
@@ -186,17 +599,26 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
             else EnterReplay();
         }
 
-        if (!IsReplaying || trajectory == null || trajectory.FrameCount == 0) return;
+        if (IsReplaying && Keyboard.current != null && Keyboard.current[panelToggleKey].wasPressedThisFrame)
+            showPanel = !showPanel;
+
+        if (IsReplaying && Keyboard.current != null && Keyboard.current[recordVideoKey].wasPressedThisFrame)
+        {
+            if (IsRecordingVideo) StopReplayVideoRecording();
+            else StartReplayVideoRecording();
+        }
+
+        if (IsRecordingVideo || !IsReplaying || trajectory == null || trajectory.FrameCount == 0) return;
 
         HandleScrubInput();
 
         if (isPlaying)
         {
-            playhead += Time.deltaTime * speed;
+            playhead += Time.unscaledDeltaTime * speed;
 
             if (playhead >= PlaybackDuration)
             {
-                if (loop) playhead = 0f;
+                if (loop && PlaybackDuration > 0f) playhead %= PlaybackDuration;
                 else { playhead = PlaybackDuration; isPlaying = false; }
             }
         }
@@ -206,7 +628,9 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
     // ------------------------------------------------------------- mode switching
 
-    public void EnterReplay()
+    public void EnterReplay() => EnterReplay(true);
+
+    private void EnterReplay(bool loadInitial)
     {
         if (IsReplaying) return;
 
@@ -221,7 +645,8 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         savedShowUI = uiController.showUI;
         savedManagerEnabled = swarmManager != null && swarmManager.enabled;
 
-        uiController.SetMotion(false);
+        CaptureSceneState();
+        if (uiController.enabled && !enterReplayOnStart) uiController.SetMotion(false);
         uiController.showUI = false;
 
         if (swarmManager != null)
@@ -241,12 +666,14 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         IsReplaying = true;
         RefreshFileList();
 
-        if (availableFiles.Length > 0 && trajectory == null)
+        if (loadInitial && availableFiles.Length > 0 && trajectory == null)
         {
             int initialIndex = System.Array.IndexOf(availableFiles, initialRecording);
-            LoadByIndex(initialIndex >= 0 ? initialIndex : 0);
+            if (!string.IsNullOrEmpty(initialRecording) && initialIndex < 0)
+                status = $"Recording not found: {initialRecording}";
+            else LoadByIndex(initialIndex >= 0 ? initialIndex : 0);
         }
-        else if (trajectory != null) { BuildAgents(); ApplyRecordedSceneState(); ApplyPlayhead(); }
+        else if (loadInitial && trajectory != null) { BuildAgents(); ApplyRecordedSceneState(); ApplyPlayhead(); }
 
         Debug.Log("[Replay] Entered replay mode.");
     }
@@ -255,6 +682,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     {
         if (!IsReplaying) return;
 
+        StopReplayVideoRecording();
         DestroyReplayAgents();
         RestoreLiveAgents();
 
@@ -264,16 +692,15 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
             if (matchRecordedSceneState)
             {
-                // Puts the live goal area and every wall back the way the panel has them.
-                uiController.EnableAllWalls();
-                uiController.ApplySettingsToManager();
+                RestoreSceneState();
             }
         }
 
         if (swarmManager != null)
         {
             if (swarmManager.densityMonitor != null) swarmManager.densityMonitor.enabled = savedDensityMonitorEnabled;
-            swarmManager.enabled = savedManagerEnabled;
+            if (uiController.enabled && !enterReplayOnStart) uiController.SetMotion(savedManagerEnabled);
+            else swarmManager.enabled = savedManagerEnabled;
         }
 
         IsReplaying = false;
@@ -313,6 +740,14 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         TrajectoryHeader h = trajectory.header;
 
+        RestoreSceneState();
+        HideLiveAgents();
+        if (h.cameraRecorded) ApplyCamera(h.camera);
+        if (h.geometry != null && h.geometry.Count > 0)
+        {
+            ApplyGeometry(h.geometry);
+            return;
+        }
         uiController.EnableAllWalls();
         if (!string.IsNullOrEmpty(h.wallsDisabled))
         {
@@ -374,6 +809,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     /// <summary>Loads any trajectory by absolute path, e.g. the one SimRecorder just wrote.</summary>
     public void LoadFromPath(string path)
     {
+        if (IsRecordingVideo) return;
         SwarmTrajectory loaded = SwarmTrajectory.Load(path);
         if (loaded == null) { status = $"Failed to load {Path.GetFileName(path)}"; return; }
 
@@ -383,6 +819,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
             return;
         }
 
+        if (!IsReplaying) EnterReplay(false);
         trajectory = loaded;
         loadedPath = path;
         BuildAgents();
@@ -423,7 +860,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     {
         DestroyReplayAgents();
 
-        if (trajectory == null || compareReferenceReplay) return;
+        if (!IsReplaying || trajectory == null || compareReferenceReplay) return;
 
         GameObject prefab = uiController != null ? uiController.agentPrefab : null;
         if (prefab == null)
@@ -436,7 +873,10 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         if (container == null)
         {
             container = new GameObject("ReplayAgents").transform;
-            container.SetParent(transform, false);
+            container.position = Vector3.zero;
+            container.rotation = Quaternion.identity;
+            container.localScale = Vector3.one;
+            container.gameObject.SetActive(false);
         }
 
         for (int i = 0; i < trajectory.AgentCount; i++)
@@ -457,14 +897,18 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
             trails.Add(showTrails ? CreateTrail(agent) : null);
         }
 
+        ApplyPlayhead();
+        container.gameObject.SetActive(true);
         EnsureHullRenderers();
     }
 
     private void DestroyReplayAgents()
     {
-        foreach (Transform t in spawned)
+        if (container != null)
         {
-            if (t != null) Destroy(t.gameObject);
+            container.gameObject.SetActive(false);
+            Destroy(container.gameObject);
+            container = null;
         }
         spawned.Clear();
         trails.Clear();
@@ -480,16 +924,24 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     /// <summary>Removes anything that would move or collide, so the replay is purely the data.</summary>
     private void Strip(GameObject agent)
     {
-        SwarmAgent sim = agent.GetComponent<SwarmAgent>();
-        if (sim != null) Destroy(sim);
-
-        PerceptionVisualizer existing = agent.GetComponent<PerceptionVisualizer>();
-        if (existing != null) Destroy(existing);
-
-        Rigidbody2D body = agent.GetComponent<Rigidbody2D>();
-        if (body != null) Destroy(body);
-
-        foreach (Collider2D c in agent.GetComponents<Collider2D>()) Destroy(c);
+        // Quiet the entire hierarchy before activating the clone; Destroy is deferred by Unity.
+        foreach (MonoBehaviour script in agent.GetComponentsInChildren<MonoBehaviour>(true))
+        {
+            script.enabled = false;
+            Destroy(script);
+        }
+        foreach (Rigidbody2D body in agent.GetComponentsInChildren<Rigidbody2D>(true))
+        {
+            body.simulated = false;
+            Destroy(body);
+        }
+        foreach (Collider2D collider in agent.GetComponentsInChildren<Collider2D>(true))
+        {
+            collider.enabled = false;
+            Destroy(collider);
+        }
+        foreach (LineRenderer line in agent.GetComponentsInChildren<LineRenderer>(true))
+            line.enabled = false;
     }
 
     private LineRenderer CreateTrail(GameObject agent)
@@ -606,10 +1058,21 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
                 rotation = Mathf.LerpAngle(rotation, trajectory.GetRotation(nextFrame, i), blend);
             }
 
-            t.position = new Vector3(position.x, position.y, t.position.z);
+            float z = t.position.z;
+            bool active = true;
+            if (trajectory.header.agentStatesRecorded)
+            {
+                int state = i * SwarmTrajectory.StateStride;
+                List<float> values = trajectory.frames[currentFrame].s;
+                z = values[state];
+                t.localScale = new Vector3(values[state + 1], values[state + 2], values[state + 3]);
+                active = values[state + 4] > 0f;
+            }
+            t.gameObject.SetActive(active);
+            t.position = new Vector3(position.x, position.y, z);
             if (applyRotation) t.rotation = Quaternion.AngleAxis(rotation, Vector3.forward);
 
-            positionBuffer.Add(position);
+            if (active) positionBuffer.Add(position);
             UpdateTrail(i);
         }
 
@@ -930,12 +1393,13 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         }
     }
 
-    public void Play() { isPlaying = true; }
-    public void Pause() { isPlaying = false; }
-    public void TogglePlay() { isPlaying = !isPlaying; }
+    public void Play() { if (!IsRecordingVideo) isPlaying = true; }
+    public void Pause() { if (!IsRecordingVideo) isPlaying = false; }
+    public void TogglePlay() { if (!IsRecordingVideo) isPlaying = !isPlaying; }
 
     public void SeekToFrame(int frame)
     {
+        if (IsRecordingVideo) return;
         if (trajectory == null || trajectory.FrameCount == 0) return;
         playhead = trajectory.frames[Mathf.Clamp(frame, 0, trajectory.FrameCount - 1)].t;
         ApplyPlayhead();
@@ -943,6 +1407,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
     public void StepFrames(int delta)
     {
+        if (IsRecordingVideo) return;
         if (trajectory == null || trajectory.FrameCount == 0) return;
         isPlaying = false;
         SwarmTrajectory timeline = compareReferenceReplay && referenceTrajectory != null &&
@@ -953,6 +1418,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
     public void SeekToTime(float time)
     {
+        if (IsRecordingVideo) return;
         if (trajectory == null || trajectory.FrameCount == 0) return;
         playhead = Mathf.Clamp(time, 0f, PlaybackDuration);
         ApplyPlayhead();
@@ -969,7 +1435,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
     private static readonly Color Accent = new Color(0.42f, 0.78f, 1f);
     private static readonly Color Warn = new Color(1f, 0.48f, 0.42f);
 
-    private const float PanelWidth = 400f;
+    private const float PanelWidth = 550f;
     private const float LabelColumn = 132f;
 
     private void EnsureStyles()
@@ -1101,19 +1567,29 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
 
         if (compareReferenceReplay && trajectory != null && comparisonView != null)
         {
-            comparisonView.Draw(new Rect(PanelWidth + 28f, 12f,
-                Mathf.Max(1f, Screen.width - PanelWidth - 42f), Mathf.Max(1f, Screen.height - 24f)),
+            float left = PanelVisible ? PanelWidth + 28f : 14f;
+            comparisonView.Draw(new Rect(left, 12f,
+                Mathf.Max(1f, Screen.width - left - 14f), Mathf.Max(1f, Screen.height - 24f)),
                 playhead, interpolate, showHull, showPerceptionRadius, showTrails, trailFrames,
                 hullTrimFraction, hullColor, referenceHullColor, referenceStatus, titleStyle, mutedStyle);
         }
 
+        if (!PanelVisible) return;
+
         float height = Mathf.Min(Screen.height - 24f, 760f);
         GUILayout.BeginArea(new Rect(14, 12, PanelWidth, height), GUIContent.none, panelStyle);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"<color=#6bc6ff>REPLAY</color>  <size=11><color=#9aa4b0>press {toggleKey} for live</color></size>", titleStyle);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button($"Hide ({panelToggleKey})", buttonStyle, GUILayout.Width(84f))) showPanel = false;
+        GUILayout.EndHorizontal();
         panelScroll = GUILayout.BeginScrollView(panelScroll, GUIStyle.none, GUI.skin.verticalScrollbar);
 
-        GUILayout.Label($"<color=#6bc6ff>REPLAY</color>  <size=11><color=#9aa4b0>press {toggleKey} for live</color></size>", titleStyle);
         GUILayout.Label(status, statusStyle);
+        DrawVideoRecording();
 
+        bool controlsEnabled = GUI.enabled;
+        GUI.enabled = controlsEnabled && !IsRecordingVideo;
         if (trajectory != null && trajectory.FrameCount > 0)
         {
             DrawTransport();
@@ -1122,6 +1598,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         }
 
         DrawFileList();
+        GUI.enabled = controlsEnabled;
 
         GUILayout.EndScrollView();
         GUILayout.EndArea();
@@ -1385,8 +1862,15 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
                         $"space plays  ·  {toggleKey} returns to live", mutedStyle);
     }
 
+    private void OnDisable()
+    {
+        if (IsReplaying) ExitReplay();
+    }
+
     private void OnDestroy()
     {
+        StopReplayVideoRecording();
+        DestroyReplayAgents();
         comparisonView?.Dispose();
     }
 }

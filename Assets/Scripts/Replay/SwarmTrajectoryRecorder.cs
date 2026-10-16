@@ -180,6 +180,7 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
     {
         if (!isCapturing) return working;
 
+        CaptureFrame();
         isCapturing = false;
         if (working != null)
         {
@@ -318,6 +319,7 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
             {
                 // Keep the slot so agent indices stay aligned across frames.
                 for (int i = 0; i < SwarmTrajectory.Stride; i++) frame.v.Add(0f);
+                for (int i = 0; i < SwarmTrajectory.StateStride; i++) frame.s.Add(0f);
                 continue;
             }
 
@@ -332,6 +334,12 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
             frame.v.Add(rotation);
             frame.v.Add(velocity.x);
             frame.v.Add(velocity.y);
+            Vector3 scale = agentTransform.lossyScale;
+            frame.s.Add(p.z);
+            frame.s.Add(scale.x);
+            frame.s.Add(scale.y);
+            frame.s.Add(scale.z);
+            frame.s.Add(agentTransform.gameObject.activeInHierarchy ? 1f : 0f);
 
             if (captureWallContacts && contactWalls.Count > 0 && TouchesWall(p))
             {
@@ -360,6 +368,21 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
         working.frames.Add(frame);
     }
 
+    private static TrajectoryCamera CaptureCamera()
+    {
+        Camera camera = Camera.main;
+        if (camera == null) return null;
+        return new TrajectoryCamera
+        {
+            position = camera.transform.position,
+            rotation = camera.transform.rotation,
+            orthographic = camera.orthographic,
+            orthographicSize = camera.orthographicSize,
+            fieldOfView = camera.fieldOfView,
+            backgroundColor = camera.backgroundColor
+        };
+    }
+
     private TrajectoryHeader BuildHeader(string label)
     {
         string[] names = new string[capturedAgents.Length];
@@ -381,6 +404,9 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
             agentSpawnShortfall = uiController != null && uiController.AgentSpawnShortfall,
             captureHz = captureHz,
             agentNames = names,
+            agentStatesRecorded = true,
+            camera = CaptureCamera(),
+            cameraRecorded = Camera.main != null,
 
             contactsRecorded = captureWallContacts && contactWalls.Count > 0,
             contactDistance = contactDistance,
@@ -451,6 +477,10 @@ public class SwarmTrajectoryRecorder : MonoBehaviour
 
         TrajectoryGeometry entry = new TrajectoryGeometry { name = source.name, role = role };
         Transform t = source.transform;
+        entry.transformRecorded = true;
+        entry.position = t.position;
+        entry.orientation = t.rotation;
+        entry.scale = t.lossyScale;
 
         CircleCollider2D circle = source.GetComponent<CircleCollider2D>();
         BoxCollider2D box = source.GetComponent<BoxCollider2D>();

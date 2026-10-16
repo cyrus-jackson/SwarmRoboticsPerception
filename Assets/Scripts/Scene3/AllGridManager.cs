@@ -99,7 +99,9 @@ public class AllGridManager : MonoBehaviour
     private void Start()
     {
         AllGridBatchManager batch = GetComponent<AllGridBatchManager>();
-        if (!built && (batch == null || !batch.isActiveAndEnabled)) BuildGrid();
+        MotionCombinationGridManager motionGrid = GetComponent<MotionCombinationGridManager>();
+        if (!built && (batch == null || !batch.isActiveAndEnabled) &&
+            (motionGrid == null || !motionGrid.isActiveAndEnabled)) BuildGrid();
     }
 
     [ContextMenu("Build / Reload Grid")]
@@ -281,6 +283,15 @@ public class AllGridManager : MonoBehaviour
     internal void SetBatchOutputFolder(string folder) => batchOutputFolder = folder;
     internal void SetRecordingSelection(AllRecordingCatalog.Grid selection) => selectedGrid = selection;
 
+    internal void ShowSelectionError(string message)
+    {
+        ClearGrid();
+        built = false;
+        CreateContainer();
+        Fail(message);
+        heading.text = message;
+    }
+
     internal static string GetRecordingFolder(string sourceFolder)
     {
         string source = Path.GetFullPath(ResolveFolder(sourceFolder))
@@ -405,6 +416,7 @@ public class AllGridManager : MonoBehaviour
     private void CreateCell(string path, int layout, string label = null)
     {
         string cellTitle = label ?? $"Layout {layout:00}";
+        float labelHeight = selectedGrid != null ? Mathf.Max(24f, selectedGrid.labelHeight) : 24f;
         GameObject element = new GameObject($"Layout_{layout:00}", typeof(RectTransform));
         element.transform.SetParent(content, false);
         UnityEngine.UI.Image background = element.AddComponent<UnityEngine.UI.Image>();
@@ -418,13 +430,13 @@ public class AllGridManager : MonoBehaviour
         labelRect.anchorMin = new Vector2(0, 1);
         labelRect.anchorMax = Vector2.one;
         labelRect.pivot = new Vector2(0.5f, 1);
-        labelRect.offsetMin = new Vector2(2, -24);
+        labelRect.offsetMin = new Vector2(2, -labelHeight);
         labelRect.offsetMax = new Vector2(-2, 0);
 
         GameObject area = new GameObject("VideoArea", typeof(RectTransform));
         area.transform.SetParent(element.transform, false);
         Stretch((RectTransform)area.transform);
-        ((RectTransform)area.transform).offsetMax = new Vector2(0, -24);
+        ((RectTransform)area.transform).offsetMax = new Vector2(0, -labelHeight);
         GameObject view = new GameObject("Video", typeof(RectTransform));
         view.transform.SetParent(area.transform, false);
         UnityEngine.UI.RawImage image = view.AddComponent<UnityEngine.UI.RawImage>();
@@ -453,7 +465,7 @@ public class AllGridManager : MonoBehaviour
         cell.player.loopPointReached += player =>
         {
             cell.finished = true;
-            cell.label.text = cellTitle + " · ended";
+            cell.label.text = selectedGrid == null || selectedGrid.showEndLabels ? cellTitle + " · ended" : cellTitle;
         };
         cell.player.started += player => cell.label.text = cellTitle;
         cell.player.errorReceived += (player, message) =>
@@ -487,7 +499,8 @@ public class AllGridManager : MonoBehaviour
 
         if (selectedGrid != null)
         {
-            heading.text = $"{selectedGrid.title} · {cells.Count} videos · {status}";
+            heading.text = selectedGrid.titleOnly && !failed ? selectedGrid.title
+                : $"{selectedGrid.title} · {cells.Count} videos · {status}";
             return;
         }
 
