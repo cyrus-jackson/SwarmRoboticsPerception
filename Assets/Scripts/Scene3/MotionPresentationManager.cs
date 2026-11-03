@@ -28,7 +28,7 @@ public sealed class MotionPresentationManager : MonoBehaviour
     [Min(1)] public float prepareTimeout = 60f;
 
     [Header("Recording")]
-    [Tooltip("Record all four title cards and motion sections into one 30 fps MP4. Checking during playback restarts the sequence. Unity Editor only.")]
+    [Tooltip("Record all four title cards and motion sections into one 30 fps QuickTime MOV with H.264 compression. Checking during playback restarts the sequence. Unity Editor only.")]
     public bool recordOneIteration;
     [Tooltip("Destination folder, absolute or relative to the project folder. Existing folders can be reused.")]
     public string outputFolderPath = "Grid Recordings/Motion Presentation";
@@ -478,7 +478,7 @@ public sealed class MotionPresentationManager : MonoBehaviour
             : clip.perception.ToString("0.##", CultureInfo.InvariantCulture);
         string speed = clip.maxSpeed == 1.5 ? "(Slow)" : clip.maxSpeed == 3 ? "(Fast)"
             : clip.maxSpeed.ToString("0.##", CultureInfo.InvariantCulture);
-        string label = $"Perception {perception} · Speed {speed}";
+        string label = $"Perception Radius {perception} · Speed {speed}";
         var element = new GameObject("Combination", typeof(RectTransform), typeof(UnityEngine.UI.Image));
         element.transform.SetParent(parent, false);
         element.GetComponent<UnityEngine.UI.Image>().color = new Color(0.075f, 0.09f, 0.115f, 1);

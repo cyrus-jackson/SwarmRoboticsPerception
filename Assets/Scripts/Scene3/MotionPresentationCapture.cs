@@ -21,7 +21,7 @@ internal sealed class MotionPresentationCapture
     {
         ffmpeg = FindFfmpeg();
         string name = $"motion_presentation_layout_{layout:00}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}";
-        finalPath = Path.Combine(destination, name + ".mp4");
+        finalPath = Path.Combine(destination, name + ".mov");
         folder = Path.Combine(destination, name + "_segments");
         Directory.CreateDirectory(folder);
         this.width = width;
@@ -55,14 +55,14 @@ internal sealed class MotionPresentationCapture
         if (segments.Count == 0) { Directory.Delete(folder, true); return null; }
         string list = Path.Combine(folder, "sections.txt");
         File.WriteAllLines(list, segments.Select(path => "file '" + path.Replace("\\", "/").Replace("'", "'\\''") + "'"));
-        string partial = Path.Combine(Path.GetDirectoryName(finalPath), Path.GetFileNameWithoutExtension(finalPath) + "_partial.mp4");
+        string partial = Path.Combine(Path.GetDirectoryName(finalPath), Path.GetFileNameWithoutExtension(finalPath) + "_partial.mov");
         using (var process = new Process())
         {
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = ffmpeg,
                 Arguments = "-hide_banner -loglevel error -y -f concat -safe 0 -i " + Quote(list) +
-                    " -map 0:v:0 -c copy -movflags +faststart " + Quote(partial),
+                    " -map 0:v:0 -c copy -movflags +faststart -f mov " + Quote(partial),
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true
@@ -91,7 +91,7 @@ internal sealed class MotionPresentationCapture
         candidates.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
             .Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => Path.Combine(path, executable)));
         string found = candidates.FirstOrDefault(File.Exists);
-        if (found == null) throw new FileNotFoundException("Install FFmpeg to join the motion recordings into one MP4, then restart Unity.");
+        if (found == null) throw new FileNotFoundException("Install FFmpeg to join the motion recordings into one QuickTime MOV, then restart Unity.");
         return found;
     }
 }

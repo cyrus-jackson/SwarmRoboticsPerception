@@ -148,7 +148,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 012e8d4e8cf947868be1f8a2ff4b1438, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MotionPresentationManager
-  folderPath: Assets/SimulationRecordings/Combinations/20261009_113950
+  folderPath: /Users/cyrusjackson/Documents/Papers/Temp/_DONOTEDIT_20261009_113950
   repeat: 1
   motionOrder: 00000000040000000300000002000000
   titleDuration: 2
