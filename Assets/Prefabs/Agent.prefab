@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 6320038312292316372}
   - component: {fileID: 4028263160699923319}
   - component: {fileID: 9101192015602588322}
+  - component: {fileID: 7310455206911824617}
   m_Layer: 0
   m_Name: Agent
   m_TagString: Untagged
@@ -84,8 +85,8 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_MaskInteraction: 0
-  m_Sprite: {fileID: -2413806693520163455, guid: a86470a33a6bf42c4b3595704624658b, type: 3}
-  m_Color: {r: 0, g: 0, b: 0, a: 1}
+  m_Sprite: {fileID: 21300000, guid: a2bbf27a64e34cc2921bde3a2e82345a, type: 3}
+  m_Color: {r: 0.22, g: 0.22, b: 0.22, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
@@ -169,3 +170,15 @@ CircleCollider2D:
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
   m_Radius: 0.52
+--- !u!114 &7310455206911824617
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1948534824408967942}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9513ce130c9749209f839dfc201058a7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AgentBlinker

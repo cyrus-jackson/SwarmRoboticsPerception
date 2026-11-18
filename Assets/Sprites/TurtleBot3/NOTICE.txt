@@ -1,0 +1,16 @@
+turtlebot3_burger_topdown.png
+
+Top-down orthographic render of the TurtleBot3 Burger, assembled from the
+visual meshes and URDF in ROBOTIS' turtlebot3_description package:
+  https://github.com/ROBOTIS-GIT/turtlebot3  (branch main, commit fc817ce)
+  meshes/bases/burger_base.stl, meshes/wheels/left_tire.stl,
+  meshes/wheels/right_tire.stl, meshes/sensors/lds.stl
+  urdf/turtlebot3_burger.urdf
+
+Copyright ROBOTIS CO., LTD. Licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0). This image is a derived work:
+the meshes were assembled, rendered from above and shaded in greyscale.
+
+Orientation: robot forward (+x in the ROS frame) points to the right (+X) of the image.
+Scale: 240 pixels per unit, so the robot's 178 mm wheel-to-wheel width spans 1 unit,
+the same footprint as the Circle sprite it replaces.
