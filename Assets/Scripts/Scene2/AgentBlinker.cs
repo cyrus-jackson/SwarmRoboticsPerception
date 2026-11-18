@@ -17,6 +17,8 @@ public class AgentBlinker : MonoBehaviour
     [Min(0f)] public float lightSize = 0.4f;
     [Tooltip("Position of the left light in local units: x = forward, y = left. The right light is mirrored.")]
     public Vector2 lightOffset = new Vector2(0.4f, 0.0f);
+    [Tooltip("Off: the light is drawn on top of the robot. On: it sits underneath, so the body covers the part of the light and halo it overlaps.")]
+    public bool lightUnderBody = true;
 
     [Header("Robot body")]
     [Tooltip("Off: dark robot, for light backgrounds. On: light robot, for dark backgrounds.")]
@@ -47,6 +49,7 @@ public class AgentBlinker : MonoBehaviour
     // private SpriteRenderer right;
     private SpriteRenderer haloRenderer;
     private SpriteRenderer bodyRenderer;
+    private int bodySortingOrder;
     private float phase;
     private bool isOn;
 
@@ -54,15 +57,16 @@ public class AgentBlinker : MonoBehaviour
     {
         SpriteRenderer body = GetComponent<SpriteRenderer>();
         bodyRenderer = body;
+        bodySortingOrder = body != null ? body.sortingOrder : 0;
         ApplyBody();
-        // Drawn above the body and below the light, so the glow spills onto the robot and its neighbours.
-        haloRenderer = GetOrCreateLight(HaloName, body, GetHaloSprite(), 1);
-        left = GetOrCreateLight(LeftName, body, GetLightSprite(), 2);
+        haloRenderer = GetOrCreateLight(HaloName, body, GetHaloSprite());
+        left = GetOrCreateLight(LeftName, body, GetLightSprite());
         // right = GetOrCreateLight(RightName, body);
 
         // A golden-ratio sequence instead of UnityEngine.Random, so the simulation's random stream is untouched.
         phase = randomPhase ? Mathf.Repeat(++instanceCount * 0.6180339887f, 1f) : 0f;
 
+        ApplySorting();
         Layout();
         Apply(ShouldBeOn());
     }
@@ -77,6 +81,7 @@ public class AgentBlinker : MonoBehaviour
     {
         if (!Application.isPlaying || left == null) return;
         ApplyBody();
+        ApplySorting();
         Layout();
         Apply(isOn);
     }
@@ -111,6 +116,18 @@ public class AgentBlinker : MonoBehaviour
         if (bodyRenderer != null) bodyRenderer.color = lightBody ? lightBodyColor : darkBodyColor;
     }
 
+    /// <summary>
+    /// Stacks halo, light and body. Sprites sort by sorting layer and order before z, so a z offset alone cannot put the
+    /// light under the body. On top, the glow spills onto the robot and its neighbours; underneath, every body covers
+    /// every light, so the glow only shows on the floor around the robots.
+    /// </summary>
+    private void ApplySorting()
+    {
+        if (haloRenderer != null) haloRenderer.sortingOrder = bodySortingOrder + 1;
+        left.sortingOrder = bodySortingOrder + 2;
+        if (bodyRenderer != null) bodyRenderer.sortingOrder = lightUnderBody ? bodySortingOrder + 3 : bodySortingOrder;
+    }
+
     private void Layout()
     {
         Vector3 scale = Vector3.one * lightSize;
@@ -125,7 +142,7 @@ public class AgentBlinker : MonoBehaviour
         // right.transform.localScale = scale;
     }
 
-    private SpriteRenderer GetOrCreateLight(string lightName, SpriteRenderer body, Sprite sprite, int orderAboveBody)
+    private SpriteRenderer GetOrCreateLight(string lightName, SpriteRenderer body, Sprite sprite)
     {
         Transform lightTransform = transform.Find(lightName);
         if (lightTransform == null)
@@ -143,7 +160,6 @@ public class AgentBlinker : MonoBehaviour
         {
             lightRenderer.sharedMaterial = body.sharedMaterial;
             lightRenderer.sortingLayerID = body.sortingLayerID;
-            lightRenderer.sortingOrder = body.sortingOrder + orderAboveBody;
         }
         return lightRenderer;
     }
