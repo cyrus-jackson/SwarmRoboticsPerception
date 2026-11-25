@@ -3,7 +3,7 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class AgentBlinker : MonoBehaviour
 {
-    [Header("Timing (ignored while FireflySync drives the light)")]
+    [Header("Timing (ignored while the light is externally driven)")]
     [Tooltip("Seconds for one on/off cycle.")]
     [Min(0.05f)] public float period = 1f;
     [Tooltip("Fraction of each cycle the lights are on.")]
@@ -55,6 +55,8 @@ public class AgentBlinker : MonoBehaviour
     private bool driven;
     private float drivenClock;
     private float drivenDutyCycle;
+    private Color? phaseColor;
+    private bool appearanceDirty;
 
     private void Awake()
     {
@@ -79,8 +81,13 @@ public class AgentBlinker : MonoBehaviour
 
     private void Update()
     {
+        RefreshLight();
+    }
+
+    internal void RefreshLight()
+    {
         bool on = ShouldBeOn();
-        if (on != isOn) Apply(on);
+        if (on != isOn || appearanceDirty) Apply(on);
     }
 
     private void OnValidate()
@@ -93,24 +100,45 @@ public class AgentBlinker : MonoBehaviour
     }
 
     /// <summary>
-    /// Called by FireflySync every physics step: the light is on while <paramref name="clock"/> (0 to 1) is below
+    /// The light is on while the externally driven <paramref name="clock"/> (0 to 1) is below
     /// <paramref name="duty"/>. This agent's own period, duty cycle and phase are ignored until <see cref="ReleaseClock"/>.
     /// </summary>
     public void DriveClock(float clock, float duty)
     {
+        ClearPhaseColor();
         driven = true;
         drivenClock = clock;
         drivenDutyCycle = duty;
+    }
+
+    /// <summary>Shows the phase as an always-on hue on the same light and halo.</summary>
+    public void DrivePhaseColor(float clock)
+    {
+        Color hue = Color.HSVToRGB(Mathf.Repeat(clock, 1f), 0.85f, 1f);
+        hue.a = onColor.a;
+        if (phaseColor.HasValue && phaseColor.Value.Equals(hue)) return;
+
+        phaseColor = hue;
+        appearanceDirty = true;
     }
 
     /// <summary>Returns the light to its own clock.</summary>
     public void ReleaseClock()
     {
         driven = false;
+        ClearPhaseColor();
+    }
+
+    private void ClearPhaseColor()
+    {
+        if (!phaseColor.HasValue) return;
+        phaseColor = null;
+        appearanceDirty = true;
     }
 
     private bool ShouldBeOn()
     {
+        if (phaseColor.HasValue) return true;
         if (driven) return drivenClock < drivenDutyCycle;
         float cycle = Mathf.Repeat(Time.time / Mathf.Max(period, 0.05f) + phase, 1f);
         return cycle < dutyCycle;
@@ -119,15 +147,17 @@ public class AgentBlinker : MonoBehaviour
     private void Apply(bool on)
     {
         isOn = on;
+        appearanceDirty = false;
+        Color color = phaseColor ?? onColor;
         // The light is hidden entirely while off, so it does not read as a part of the robot.
         if (left != null)
         {
-            left.color = onColor;
+            left.color = color;
             left.enabled = on;
         }
         if (haloRenderer != null)
         {
-            Color glow = onColor;
+            Color glow = color;
             glow.a *= haloIntensity;
             haloRenderer.color = glow;
             haloRenderer.enabled = showHalo && on;

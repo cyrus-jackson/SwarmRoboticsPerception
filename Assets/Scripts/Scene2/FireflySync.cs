@@ -3,7 +3,8 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Firefly synchronisation for the agents' blinker lights, after Nicky Case's "Fireflies"
+/// Drives the agents' blinker lights and hosts the standalone L panel for both light models.
+/// The default Firefly model follows Nicky Case's "Fireflies"
 /// (ncase.me/fireflies; the rule is ported from js/index.js in github.com/ncase/fireflies, CC0).
 ///
 /// Every robot has a clock that runs from 0 to 1, and its light is on while the clock is below the
@@ -20,6 +21,21 @@ using UnityEngine.InputSystem;
 /// </summary>
 public class FireflySync : MonoBehaviour
 {
+    private enum LightModel
+    {
+        Firefly,
+        Swarmalator
+    }
+
+    private enum SwarmalatorDisplay
+    {
+        Blink,
+        PhaseColor
+    }
+
+    private static readonly string[] LightModels = { "Firefly", "Swarmalator" };
+    private static readonly string[] SwarmalatorDisplays = { "Blink", "Phase color" };
+
     public enum RadiusMode
     {
         /// <summary>Perception radius plus the agent radius: the perception graph's edge test.</summary>
@@ -42,7 +58,7 @@ public class FireflySync : MonoBehaviour
     public bool hideWhileRecording = true;
 
     [Header("Clock")]
-    [Tooltip("Seconds per cycle. Replaces each AgentBlinker's own period while this drives it.")]
+    [Tooltip("Seconds per blink cycle. In Swarmalator mode this controls the display offset.")]
     [Range(0.2f, 5f)] public float period = 1f;
 
     [Tooltip("Fraction of each cycle the light is on, starting at the flash. Replaces each AgentBlinker's own duty cycle.")]
@@ -62,6 +78,13 @@ public class FireflySync : MonoBehaviour
 
     [Tooltip("Custom radius: centre-to-centre distance in world units.")]
     [Range(0.2f, 10f)] public float customRadius = 2f;
+
+    [Header("Light model")]
+    [SerializeField] private LightModel lightModel;
+    [Tooltip("Equation (4) coupling K. Positive values synchronize phases; negative values push phases apart.")]
+    [SerializeField, Range(-SwarmalatorLightSync.MaxCoupling, SwarmalatorLightSync.MaxCoupling)]
+    private float swarmalatorCoupling = 1f;
+    [SerializeField] private SwarmalatorDisplay swarmalatorDisplay;
 
     [Header("Start")]
     [Tooltip("On: each newly spawned swarm starts with scattered clocks, so the sync has to emerge. Off: all start in unison.")]
@@ -84,6 +107,9 @@ public class FireflySync : MonoBehaviour
     private static FireflySync instance;
 
     private readonly List<Robot> robots = new List<Robot>();
+    private readonly SwarmalatorLightSync swarmalator = new SwarmalatorLightSync();
+    private readonly List<SwarmalatorLightSync.Oscillator> oscillators = new List<SwarmalatorLightSync.Oscillator>();
+    private float displayClock;
     private GameObject[] trackedAgents;
     private System.Random random;
 
@@ -135,11 +161,29 @@ public class FireflySync : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (!RefreshRobots()) return;
+
+        if (lightModel == LightModel.Swarmalator) StepSwarmalator(Time.fixedDeltaTime);
+        else StepFirefly(Time.fixedDeltaTime);
+
+        foreach (Robot robot in robots)
+        {
+            if (robot.active) DriveLight(robot);
+        }
+    }
+
+    private bool RefreshRobots()
+    {
         if (swarmManager == null) swarmManager = FindAnyObjectByType<SwarmManager>();
-        if (swarmManager == null) return;
+        if (swarmManager == null) return false;
 
         TrackAgents(swarmManager.agents);
-        Step(Time.fixedDeltaTime);
+        foreach (Robot robot in robots)
+        {
+            robot.active = robot.blinker != null && robot.agent.activeInHierarchy;
+            if (robot.active) robot.position = robot.agent.transform.position;
+        }
+        return true;
     }
 
     /// <summary>
@@ -168,7 +212,11 @@ public class FireflySync : MonoBehaviour
                 }
             }
         }
-        if (freshSwarm || random == null) random = new System.Random(seed);
+        if (freshSwarm || random == null)
+        {
+            random = new System.Random(seed);
+            displayClock = 0f;
+        }
 
         List<Robot> next = new List<Robot>(agents != null ? agents.Length : 0);
         if (agents != null)
@@ -224,7 +272,7 @@ public class FireflySync : MonoBehaviour
         };
     }
 
-    private void Step(float deltaTime)
+    private void StepFirefly(float deltaTime)
     {
         int flashes = 0;
 
@@ -232,10 +280,7 @@ public class FireflySync : MonoBehaviour
         foreach (Robot robot in robots)
         {
             robot.flashed = false;
-            robot.active = robot.blinker != null && robot.agent.activeInHierarchy;
             if (!robot.active) continue;
-
-            robot.position = robot.agent.transform.position;
             robot.clock += deltaTime / RobotPeriod(robot);
 
             if (robot.clock > 1f)
@@ -248,11 +293,36 @@ public class FireflySync : MonoBehaviour
         }
 
         if (nudgeNeighbours && flashes > 0) NudgeNeighbours();
+    }
 
+    private void StepSwarmalator(float deltaTime)
+    {
+        oscillators.Clear();
         foreach (Robot robot in robots)
         {
-            if (robot.active) robot.blinker.DriveClock(robot.clock, dutyCycle);
+            if (robot.active)
+                oscillators.Add(new SwarmalatorLightSync.Oscillator(robot.position, robot.clock));
         }
+        if (swarmalatorCoupling < 0f) SwarmalatorLightSync.PerturbUnison(oscillators);
+        swarmalator.Step(oscillators, swarmalatorCoupling, deltaTime);
+
+        // A shared offset keeps the LEDs blinking without changing any phase differences.
+        displayClock = Mathf.Repeat(displayClock + deltaTime / Mathf.Max(period, 0.05f), 1f);
+        int index = 0;
+        foreach (Robot robot in robots)
+        {
+            if (robot.active) robot.clock = oscillators[index++].Clock;
+        }
+    }
+
+    private void DriveLight(Robot robot)
+    {
+        if (lightModel == LightModel.Firefly)
+            robot.blinker.DriveClock(robot.clock, dutyCycle);
+        else if (swarmalatorDisplay == SwarmalatorDisplay.PhaseColor)
+            robot.blinker.DrivePhaseColor(robot.clock);
+        else
+            robot.blinker.DriveClock(Mathf.Repeat(robot.clock + displayClock, 1f), dutyCycle);
     }
 
     private float RobotPeriod(Robot robot)
@@ -319,7 +389,19 @@ public class FireflySync : MonoBehaviour
 
     private void Unison()
     {
-        foreach (Robot robot in robots) robot.clock = 0f;
+        if (!RefreshRobots()) return;
+
+        displayClock = 0f;
+        foreach (Robot robot in robots)
+        {
+            robot.clock = 0f;
+            if (!robot.active) continue;
+
+            DriveLight(robot);
+            robot.blinker.RefreshLight();
+        }
+
+        Measure();
     }
 
     // ------------------------------------------------------------------ panel
@@ -334,7 +416,8 @@ public class FireflySync : MonoBehaviour
 
     private void Measure()
     {
-        shownRadius = CurrentRadius();
+        bool allToAll = lightModel == LightModel.Swarmalator;
+        shownRadius = allToAll ? 0f : CurrentRadius();
         float radiusSq = shownRadius * shownRadius;
         float x = 0f;
         float y = 0f;
@@ -350,6 +433,7 @@ public class FireflySync : MonoBehaviour
             x += Mathf.Cos(angle);
             y += Mathf.Sin(angle);
 
+            if (allToAll) continue;
             foreach (Robot other in robots)
             {
                 if (other != robot && other.active && (other.position - robot.position).sqrMagnitude < radiusSq) pairs++;
@@ -357,7 +441,7 @@ public class FireflySync : MonoBehaviour
         }
 
         shownRobots = count;
-        shownNeighbours = count > 0 ? (float)pairs / count : 0f;
+        shownNeighbours = count == 0 ? 0f : allToAll ? count - 1 : (float)pairs / count;
 
         // Kuramoto order parameter of the clocks: 0 when scattered, 1 when every robot is at the same point of its cycle.
         shownSync = count > 0 ? Mathf.Sqrt(x * x + y * y) / count : 0f;
@@ -399,10 +483,57 @@ public class FireflySync : MonoBehaviour
         GUILayout.BeginArea(new Rect(PanelX(), 10f, panelWidth, Screen.height - 20f));
         GUILayout.BeginVertical(panelStyle);
 
-        GUILayout.Label("Firefly sync", headerStyle);
-        GUILayout.Label("lights that synchronise like ncase.me/fireflies", labelStyle);
+        GUILayout.Label("Light sync (L)", headerStyle);
+        lightModel = (LightModel)GUILayout.Toolbar((int)lightModel, LightModels);
         GUILayout.Space(6);
 
+        bool firefly = lightModel == LightModel.Firefly;
+        if (firefly)
+        {
+            DrawFireflyControls();
+        }
+        else
+        {
+            Row("Phase coupling K", $"{swarmalatorCoupling:F2}");
+            float coupling = GUILayout.HorizontalSlider(swarmalatorCoupling,
+                -SwarmalatorLightSync.MaxCoupling, SwarmalatorLightSync.MaxCoupling);
+            if (coupling != swarmalatorCoupling) swarmalatorCoupling = Mathf.Round(coupling * 20f) / 20f;
+            swarmalatorDisplay = (SwarmalatorDisplay)GUILayout.Toolbar((int)swarmalatorDisplay, SwarmalatorDisplays);
+        }
+
+        GUILayout.Space(6);
+        if (firefly || swarmalatorDisplay == SwarmalatorDisplay.Blink)
+        {
+            Row("Period", $"{period:F2} s");
+            period = GUILayout.HorizontalSlider(period, 0.2f, 5f);
+            Row("Light on", $"{dutyCycle * 100f:F0}% of the cycle");
+            dutyCycle = GUILayout.HorizontalSlider(dutyCycle, 0.05f, 0.95f);
+        }
+        if (firefly)
+        {
+            Row("Speed spread", $"±{speedSpread * 100f:F0}%");
+            speedSpread = GUILayout.HorizontalSlider(speedSpread, 0f, 0.3f);
+        }
+
+        GUILayout.Space(6);
+        scatterAtSpawn = GUILayout.Toggle(scatterAtSpawn, " Scatter clocks at spawn");
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Scatter now")) Scatter();
+        if (GUILayout.Button("Unison")) Unison();
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(8);
+        Row("Robots", $"{shownRobots}");
+        Row(firefly ? "Mean neighbours" : "Coupled neighbours", $"{shownNeighbours:F1}");
+        Row("Sync level", $"{shownSync:F2}", true);
+
+        GUILayout.EndVertical();
+        GUILayout.EndArea();
+    }
+
+    private void DrawFireflyControls()
+    {
+        GUILayout.Label("lights that synchronise like ncase.me/fireflies", labelStyle);
         nudgeNeighbours = GUILayout.Toggle(nudgeNeighbours, " Nudge thy neighbour");
         Row("Nudge", $"{nudge:F3}");
         nudge = GUILayout.HorizontalSlider(nudge, 0.01f, 0.1f);
@@ -419,29 +550,6 @@ public class FireflySync : MonoBehaviour
         {
             Row("Radius", $"{shownRadius:F2}");
         }
-
-        GUILayout.Space(6);
-        Row("Period", $"{period:F2} s");
-        period = GUILayout.HorizontalSlider(period, 0.2f, 5f);
-        Row("Light on", $"{dutyCycle * 100f:F0}% of the cycle");
-        dutyCycle = GUILayout.HorizontalSlider(dutyCycle, 0.05f, 0.95f);
-        Row("Speed spread", $"±{speedSpread * 100f:F0}%");
-        speedSpread = GUILayout.HorizontalSlider(speedSpread, 0f, 0.3f);
-
-        GUILayout.Space(6);
-        scatterAtSpawn = GUILayout.Toggle(scatterAtSpawn, " Scatter clocks at spawn");
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Scatter now")) Scatter();
-        if (GUILayout.Button("Unison")) Unison();
-        GUILayout.EndHorizontal();
-
-        GUILayout.Space(8);
-        Row("Robots", $"{shownRobots}");
-        Row("Mean neighbours", $"{shownNeighbours:F1}");
-        Row("Sync level", $"{shownSync:F2}", true);
-
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
     }
 
     private void Row(string label, string value, bool strong = false)
