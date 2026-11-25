@@ -3,7 +3,7 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class AgentBlinker : MonoBehaviour
 {
-    [Header("Timing")]
+    [Header("Timing (ignored while FireflySync drives the light)")]
     [Tooltip("Seconds for one on/off cycle.")]
     [Min(0.05f)] public float period = 1f;
     [Tooltip("Fraction of each cycle the lights are on.")]
@@ -52,6 +52,9 @@ public class AgentBlinker : MonoBehaviour
     private int bodySortingOrder;
     private float phase;
     private bool isOn;
+    private bool driven;
+    private float drivenClock;
+    private float drivenDutyCycle;
 
     private void Awake()
     {
@@ -69,6 +72,9 @@ public class AgentBlinker : MonoBehaviour
         ApplySorting();
         Layout();
         Apply(ShouldBeOn());
+
+        // A scene with a swarm gets one FireflySync, which takes over this light's timing (L panel).
+        FireflySync.EnsureExists();
     }
 
     private void Update()
@@ -86,8 +92,26 @@ public class AgentBlinker : MonoBehaviour
         Apply(isOn);
     }
 
+    /// <summary>
+    /// Called by FireflySync every physics step: the light is on while <paramref name="clock"/> (0 to 1) is below
+    /// <paramref name="duty"/>. This agent's own period, duty cycle and phase are ignored until <see cref="ReleaseClock"/>.
+    /// </summary>
+    public void DriveClock(float clock, float duty)
+    {
+        driven = true;
+        drivenClock = clock;
+        drivenDutyCycle = duty;
+    }
+
+    /// <summary>Returns the light to its own clock.</summary>
+    public void ReleaseClock()
+    {
+        driven = false;
+    }
+
     private bool ShouldBeOn()
     {
+        if (driven) return drivenClock < drivenDutyCycle;
         float cycle = Mathf.Repeat(Time.time / Mathf.Max(period, 0.05f) + phase, 1f);
         return cycle < dutyCycle;
     }
