@@ -927,6 +927,7 @@ public class SwarmTrajectoryPlayer : MonoBehaviour
         // Quiet the entire hierarchy before activating the clone; Destroy is deferred by Unity.
         foreach (MonoBehaviour script in agent.GetComponentsInChildren<MonoBehaviour>(true))
         {
+            if (script is AgentBlinker) continue; // purely visual, keep it blinking in replays
             script.enabled = false;
             Destroy(script);
         }
