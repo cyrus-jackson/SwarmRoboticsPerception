@@ -75,8 +75,8 @@ public class AgentBlinker : MonoBehaviour
         Layout();
         Apply(ShouldBeOn());
 
-        // A scene with a swarm gets one FireflySync, which takes over this light's timing (L panel).
-        FireflySync.EnsureExists();
+        // The shared controller drives this light and provides the L panel.
+        SwarmLightSyncController.EnsureExists();
     }
 
     private void Update()
