@@ -115,6 +115,7 @@ public class UI : MonoBehaviour
     private float uiPerceptionRad = 0.2f;
     private float uiMaxSpeed = 1.5f;
     private bool uiShowPerceptionRadius = false;
+    private readonly DirectionsPanel directionsPanel = new DirectionsPanel();
     private bool uiShowDensityArea = false;
     private Vector2 scrollPosition;
     private Texture2D bgTexture;
@@ -299,6 +300,7 @@ public class UI : MonoBehaviour
         {
             swarmManager.agents = activeAgents.ToArray();
             swarmManager.RebuildAgentCache();
+            directionsPanel.ApplyToNewSwarm(swarmManager);
             UpdateSwarmManager();
 
             if (ActiveGoalArea != null) ActiveGoalArea.ResetTracking();
@@ -387,6 +389,9 @@ public class UI : MonoBehaviour
             showUI = !showUI;
         }
 
+        if (Keyboard.current.oKey.wasPressedThisFrame)
+            directionsPanel.Visible = !directionsPanel.Visible;
+
         if (Keyboard.current.spaceKey.wasPressedThisFrame)
         {
             ToggleMotion();
@@ -452,7 +457,11 @@ public class UI : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showUI || IsReplayActive) return;
+        if (IsReplayActive) return;
+        if (directionsPanel.Visible && swarmManager != null &&
+            !(TryGetComponent(out SimRecorder recorder) && recorder.OperatorOverlayHidden))
+            directionsPanel.Draw(swarmManager);
+        if (!showUI) return;
 
         if (bgTexture == null)
         {

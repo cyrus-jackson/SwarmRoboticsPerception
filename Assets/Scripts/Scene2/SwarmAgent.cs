@@ -30,6 +30,7 @@ public class SwarmAgent : MonoBehaviour
 
     /// <summary>Current velocity, exposed so trajectory capture can record it.</summary>
     public Vector2 Velocity => body != null && body.simulated ? body.linearVelocity : currentVelocity;
+    internal SwarmForceSample LastForces { get; private set; }
 
     private void Awake()
     {
@@ -112,17 +113,18 @@ public class SwarmAgent : MonoBehaviour
         }
 
         Vector2 acceleration = Vector2.zero;
+        Vector2 cohesionForce = Vector2.zero, separationForce = Vector2.zero, alignmentForce = Vector2.zero;
 
         if (neighborCount > 0)
         {
             // Rule 1: Cohesion
-            Vector2 cohesionForce = ((cohesionSum / neighborCount) - currentPosition) * manager.cohesionIntensity;
+            cohesionForce = ((cohesionSum / neighborCount) - currentPosition) * manager.cohesionIntensity;
 
             // Rule 2: Separation
-            Vector2 separationForce = (separationSum / neighborCount) * manager.separationIntensity;
+            separationForce = (separationSum / neighborCount) * manager.separationIntensity;
 
             // Rule 3: Alignment
-            Vector2 alignmentForce = (alignmentSum / neighborCount) * manager.alignmentIntensity;
+            alignmentForce = (alignmentSum / neighborCount) * manager.alignmentIntensity;
 
             acceleration += cohesionForce + separationForce + alignmentForce;
         }
@@ -154,6 +156,7 @@ public class SwarmAgent : MonoBehaviour
         // Rule 5: Friction
         Vector2 frictionForce = -currentVelocity * manager.frictionIntensity;
         acceleration += frictionForce;
+        LastForces = new SwarmForceSample(acceleration, cohesionForce, separationForce, alignmentForce, overlappingAvoidanceForce);
 
         // Apply Dynamics Updates
         currentVelocity += acceleration * deltaTime;

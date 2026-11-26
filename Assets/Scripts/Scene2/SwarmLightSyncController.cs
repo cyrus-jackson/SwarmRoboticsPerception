@@ -34,6 +34,8 @@ public sealed class SwarmLightSyncController : MonoBehaviour
     [Range(0.05f, 0.95f)] public float dutyCycle = 0.5f;
 
     [Header("Light model")]
+    [Tooltip("Run the selected light model and show its lights. Off hides the controlled lights and halos.")]
+    [SerializeField] private bool lightSyncEnabled = true;
     [SerializeField] private LightModel lightModel = LightModel.Swarmalator;
     [SerializeField] private FireflyLightSync firefly = new FireflyLightSync();
     [SerializeField] private SwarmalatorLightSync swarmalator = new SwarmalatorLightSync();
@@ -65,6 +67,7 @@ public sealed class SwarmLightSyncController : MonoBehaviour
     private GUIStyle labelStyle;
     private GUIStyle valueStyle;
     private GUIStyle panelStyle;
+    private GUIStyle toggleStyle;
     private Texture2D background;
 
     /// <summary>Called by every AgentBlinker as it wakes. Creates one sync in a scene that has a swarm.</summary>
@@ -101,13 +104,33 @@ public sealed class SwarmLightSyncController : MonoBehaviour
     {
         if (!RefreshRobots()) return;
 
-        SwarmLightSync model = CurrentModel;
-        model.Step(robots, swarmManager, period, Time.fixedDeltaTime);
+        if (lightSyncEnabled) CurrentModel.Step(robots, swarmManager, period, Time.fixedDeltaTime);
+        UpdateLights();
+    }
 
+    private void UpdateLights(bool refreshImmediately = false)
+    {
+        SwarmLightSync model = CurrentModel;
         foreach (Robot robot in robots)
         {
-            if (robot.active) model.DriveLight(robot, dutyCycle);
+            if (!robot.active) continue;
+
+            if (lightSyncEnabled) model.DriveLight(robot, dutyCycle);
+            else robot.blinker.DriveClock(0f, 0f);
+
+            if (refreshImmediately) robot.blinker.RefreshLight();
         }
+    }
+
+    private void SetLightSyncEnabled(bool enable)
+    {
+        if (lightSyncEnabled == enable) return;
+
+        lightSyncEnabled = enable;
+        if (!RefreshRobots()) return;
+
+        UpdateLights(refreshImmediately: true);
+        if (lightSyncEnabled) Measure();
     }
 
     private bool RefreshRobots()
@@ -222,16 +245,9 @@ public sealed class SwarmLightSyncController : MonoBehaviour
         if (!RefreshRobots()) return;
 
         swarmalator.ResetDisplayClock();
-        SwarmLightSync model = CurrentModel;
-        foreach (Robot robot in robots)
-        {
-            robot.clock = 0f;
-            if (!robot.active) continue;
+        foreach (Robot robot in robots) robot.clock = 0f;
 
-            model.DriveLight(robot, dutyCycle);
-            robot.blinker.RefreshLight();
-        }
-
+        UpdateLights(refreshImmediately: true);
         Measure();
     }
 
@@ -241,8 +257,8 @@ public sealed class SwarmLightSyncController : MonoBehaviour
     {
         if (Keyboard.current != null && Keyboard.current[toggleKey].wasPressedThisFrame) visible = !visible;
 
-        // Only measured while the panel is open. The sync itself runs either way.
-        if (visible && swarmManager != null) Measure();
+        // Readouts are only needed while the panel and the light model are active.
+        if (visible && lightSyncEnabled && swarmManager != null) Measure();
     }
 
     private void Measure()
@@ -305,6 +321,10 @@ public sealed class SwarmLightSyncController : MonoBehaviour
         GUILayout.BeginVertical(panelStyle);
 
         GUILayout.Label("Light sync (L)", headerStyle);
+        SetLightSyncEnabled(GUILayout.Toggle(lightSyncEnabled, "Enable synchronized lights", toggleStyle));
+
+        bool previousGuiEnabled = GUI.enabled;
+        GUI.enabled = previousGuiEnabled && lightSyncEnabled;
         int selectedTab = lightModel == LightModel.Swarmalator ? 0 : 1;
         lightModel = GUILayout.Toolbar(selectedTab, LightModels) == 0 ? LightModel.Swarmalator : LightModel.Firefly;
         GUILayout.Space(6);
@@ -318,11 +338,15 @@ public sealed class SwarmLightSyncController : MonoBehaviour
         if (GUILayout.Button("Scatter now")) Scatter();
         if (GUILayout.Button("Unison")) Unison();
         GUILayout.EndHorizontal();
+        GUI.enabled = previousGuiEnabled;
 
         GUILayout.Space(8);
-        Row("Robots", $"{shownRobots}");
-        Row(model.NeighboursLabel, $"{shownNeighbours:F1}");
-        Row("Sync level", $"{shownSync:F2}", true);
+        if (lightSyncEnabled)
+        {
+            Row("Robots", $"{shownRobots}");
+            Row(model.NeighboursLabel, $"{shownNeighbours:F1}");
+        }
+        Row("Sync level", lightSyncEnabled ? $"{shownSync:F2}" : "Off", true);
 
         GUILayout.EndVertical();
         GUILayout.EndArea();
@@ -350,6 +374,12 @@ public sealed class SwarmLightSyncController : MonoBehaviour
     /// <summary>Same look as ClusterPanel.</summary>
     private void EnsureStyles()
     {
+        if (toggleStyle == null)
+        {
+            toggleStyle = new GUIStyle(GUI.skin.toggle);
+            toggleStyle.normal.textColor = toggleStyle.onNormal.textColor = Color.white;
+        }
+
         if (background == null)
         {
             background = new Texture2D(1, 1);
